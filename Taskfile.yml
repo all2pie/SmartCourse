@@ -1,0 +1,39 @@
+version: "3"
+
+vars:
+  BINARY: bin/api
+
+tasks:
+  tidy:
+    desc: Tidy go.mod/go.sum
+    cmds:
+      - go mod tidy
+
+  fmt:
+    desc: Format code
+    cmds:
+      - golangci-lint fmt
+
+  lint:
+    desc: Run linters
+    cmds:
+      - golangci-lint run
+
+  check:
+    desc: Format + lint (run before every commit)
+    deps: [fmt, lint]
+
+  build:
+    desc: Build the API binary
+    cmds:
+      - go build -o {{.BINARY}} ./cmd/api
+
+  run:
+    desc: Run the API
+    cmds:
+      - go run ./cmd/api
+
+  test:
+    desc: Run tests
+    cmds:
+      - go test ./... -v
