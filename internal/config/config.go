@@ -9,6 +9,7 @@ import (
 
 type Config struct {
 	AppEnv string `env:"APP_ENV" envDefault:"development"`
+	Port   int    `env:"PORT" envDefault:"8080"`
 }
 
 func Load() (*Config, error) {
