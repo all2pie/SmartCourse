@@ -5,6 +5,7 @@ import (
 	"log"
 
 	"github.com/all2pie/go-smart-course/internal/config"
+	"github.com/all2pie/go-smart-course/internal/db"
 	"github.com/all2pie/go-smart-course/internal/server"
 )
 
@@ -16,7 +17,12 @@ func main() {
 
 	fmt.Printf("SmartCourse API starting — env=%s port=%d\n", cfg.AppEnv, cfg.Port)
 
-	if err := server.Run(cfg); err != nil {
+	conn, err := db.Connect(cfg)
+	if err != nil {
+		log.Fatalf("failed to connect to database: %v", err)
+	}
+
+	if err := server.Run(cfg, conn); err != nil {
 		log.Fatalf("server failed: %v", err)
 	}
 }
