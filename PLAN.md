@@ -115,21 +115,21 @@ Goal: prove the rules that matter (access control, token security, session rotat
 
 ## Progress log
 
-| Date               | Milestone                                                                                                                       | Commit                |
-| ------------------ | ------------------------------------------------------------------------------------------------------------------------------- | --------------------- |
-| 2026-09-07 → 10-20 | Monolith foundation: tooling, Gin, Postgres + GORM + migrations, users and courses CRUD, shared error/web helpers               | `6d02497` … `71333ec` |
-| 2026-10-20         | Switched to microservices + MongoDB; architecture and access rules approved (1.1)                                               | `79ac37b`             |
-| 2026-10-20         | 1.2 + 1.3: `internal/platform`, Identity service                                                                                | `e972e47`             |
-| 2026-10-20         | 1.4: Catalog on MongoDB with visibility/ownership rules                                                                         | `38821b7`             |
-| 2026-10-20         | 1.5: Gateway reverse proxy, request IDs                                                                                         | `dadd26a`             |
-| 2026-10-20         | 1.6: Auth (register/login/refresh/logout, JWT, admin CLI)                                                                       | `039010b`             |
-| 2026-10-20         | Refresh tokens moved to Redis (atomic Lua rotation)                                                                             | `417ce64`             |
-| 2026-10-20         | 1.7: Whole stack in Docker (`task up`)                                                                                          | `a132521`             |
-| 2026-10-20         | 1.8: README, design doc, AGENTS.md, OpenAPI 3.1 + Swagger UI at `/docs`; PLAN trimmed; migration 000004 deleted                 | `7902868`             |
-| 2026-10-20         | Migration 000003 deleted (no `refresh_tokens` table; local DB rolled back to v2); test tooling decided (go-cmp, testcontainers) | `4a86031`             |
-| 2026-10-20         | Decided O1: Huma code-first API + RFC 9457 errors (planned as 1.9; tests move to 1.10)                                          | `b50a9c6`             |
-| 2026-10-20         | 1.9: 10 operations on Huma, generated `api/openapi.yaml` (`task api:gen`/`api:check`), problem+json everywhere, `Invalid` → 422 | `625f603`             |
-| 2026-10-20         | 1.10: unit, integration (testcontainers) and e2e + OpenAPI contract tests; `task test`, `test:integration`, `test:e2e`          | `a380f20`             |
-| 2026-10-20         | Error details no longer echo submitted values (passwords in 422s, raw body in 400s)                                             | `675cbd1`             |
-| 2026-10-20         | Docs brought up to date after 1.9/1.10 (test tooling decisions in design.md, AGENTS gotchas, CI gap noted)                      | `e8e6d67`             |
+| Date               | Milestone                                                                                                                               | Commit                |
+| ------------------ | --------------------------------------------------------------------------------------------------------------------------------------- | --------------------- |
+| 2026-09-07 → 10-20 | Monolith foundation: tooling, Gin, Postgres + GORM + migrations, users and courses CRUD, shared error/web helpers                       | `6d02497` … `71333ec` |
+| 2026-10-20         | Switched to microservices + MongoDB; architecture and access rules approved (1.1)                                                       | `79ac37b`             |
+| 2026-10-20         | 1.2 + 1.3: `internal/platform`, Identity service                                                                                        | `e972e47`             |
+| 2026-10-20         | 1.4: Catalog on MongoDB with visibility/ownership rules                                                                                 | `38821b7`             |
+| 2026-10-20         | 1.5: Gateway reverse proxy, request IDs                                                                                                 | `dadd26a`             |
+| 2026-10-20         | 1.6: Auth (register/login/refresh/logout, JWT, admin CLI)                                                                               | `039010b`             |
+| 2026-10-20         | Refresh tokens moved to Redis (atomic Lua rotation)                                                                                     | `417ce64`             |
+| 2026-10-20         | 1.7: Whole stack in Docker (`task up`)                                                                                                  | `a132521`             |
+| 2026-10-20         | 1.8: README, design doc, AGENTS.md, OpenAPI 3.1 + Swagger UI at `/docs`; PLAN trimmed; migration 000004 deleted                         | `7902868`             |
+| 2026-10-20         | Migration 000003 deleted (no `refresh_tokens` table; local DB rolled back to v2); test tooling decided (go-cmp, testcontainers)         | `4a86031`             |
+| 2026-10-20         | Decided O1: Huma code-first API + RFC 9457 errors (planned as 1.9; tests move to 1.10)                                                  | `b50a9c6`             |
+| 2026-10-20         | 1.9: 10 operations on Huma, generated `api/openapi.yaml` (`task api:gen`/`api:check`), problem+json everywhere, `Invalid` → 422         | `625f603`             |
+| 2026-10-20         | 1.10: unit, integration (testcontainers) and e2e + OpenAPI contract tests; `task test`, `test:integration`, `test:e2e`                  | `a380f20`             |
+| 2026-10-20         | Error details no longer echo submitted values (passwords in 422s, raw body in 400s)                                                     | `675cbd1`             |
+| 2026-10-20         | Docs brought up to date after 1.9/1.10 (test tooling decisions in design.md, AGENTS gotchas, CI gap noted)                              | `e8e6d67`             |
 | 2026-10-20         | Decided O2: Swagger UI vendored into the gateway (hash-checked `task docs:update`, CSP `default-src 'self'`), `/docs` off in production | *(this commit)*       |
