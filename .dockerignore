@@ -1,0 +1,8 @@
+.git
+.vscode
+bin
+tmp
+coverage
+*.log
+# Secrets are injected at runtime, never baked into images.
+.env

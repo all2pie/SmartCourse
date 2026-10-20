@@ -12,14 +12,29 @@ dotenv: [".env"]
 
 tasks:
   infra:up:
-    desc: Start local infra via Docker Compose
+    desc: Start only the infra containers (Postgres, Mongo, Redis); run services on the host with `task run`
     cmds:
       - docker compose up -d --wait
 
   infra:down:
-    desc: Stop local infra started via Docker Compose
+    desc: Stop the infra containers
     cmds:
       - docker compose down
+
+  up:
+    desc: Build and start everything in Docker (infra, migrations, services); gateway on :8000
+    cmds:
+      - docker compose --profile app up -d --build --wait
+
+  down:
+    desc: Stop everything started by `task up`
+    cmds:
+      - docker compose --profile app down
+
+  logs:
+    desc: 'Follow container logs (usage: task logs -- gateway identity)'
+    cmds:
+      - docker compose --profile app logs -f {{.CLI_ARGS}}
 
   migrate:up:
     desc: 'Apply all up migrations (usage: task migrate:up SERVICE=identity)'

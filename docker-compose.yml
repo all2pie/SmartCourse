@@ -1,4 +1,5 @@
 services:
+  # Infra (always started). Ports are published on 127.0.0.1 only, for local tools and `task migrate`.
   postgres:
     image: postgres:16-alpine
     container_name: smartcourse-postgres
@@ -7,7 +8,7 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres:/var/lib/postgresql/data
       - ./deploy/postgres/init:/docker-entrypoint-initdb.d:ro
@@ -27,7 +28,7 @@ services:
       # Kernels >= 6.19 refuse to start Mongo 8 without this (SERVER-121912 / SERVER-125742).
       GLIBC_TUNABLES: glibc.pthread.rseq=1
     ports:
-      - "${MONGO_PORT:-27017}:27017"
+      - "127.0.0.1:${MONGO_PORT:-27017}:27017"
     volumes:
       - mongo:/data/db
     healthcheck:
@@ -52,7 +53,7 @@ services:
     # AOF persistence: a Redis restart must not log every user out.
     command: ["redis-server", "--appendonly", "yes"]
     ports:
-      - "${REDIS_PORT:-6379}:6379"
+      - "127.0.0.1:${REDIS_PORT:-6379}:6379"
     volumes:
       - redis:/data
     healthcheck:
@@ -60,6 +61,98 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+
+  # Migrations: one-shot jobs that must succeed before their service starts
+  # (the same shape as a migration step in a production deploy pipeline).
+  migrate-identity:
+    image: migrate/migrate:v4.20.1
+    profiles: [app]
+    volumes:
+      - ./migrations/identity:/migrations:ro
+    command:
+      [
+        "-path",
+        "/migrations",
+        "-database",
+        "postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5432/identity?sslmode=disable",
+        "up",
+      ]
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  migrate-catalog:
+    image: migrate/migrate:v4.20.1
+    profiles: [app]
+    volumes:
+      - ./migrations/catalog:/migrations:ro
+    command:
+      [
+        "-path",
+        "/migrations",
+        "-database",
+        "mongodb://mongo:27017/catalog?directConnection=true",
+        "up",
+      ]
+    depends_on:
+      mongo:
+        condition: service_healthy
+
+  # Services (profile "app": started by `task up`). Same .env as local runs;
+  # only addresses are overridden to use container names. Only the gateway is published.
+  identity:
+    build:
+      context: .
+      args:
+        SERVICE: identity
+    image: smartcourse/identity:dev
+    profiles: [app]
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      IDENTITY_DB_HOST: postgres
+      IDENTITY_DB_PORT: "5432"
+      IDENTITY_REDIS_ADDR: redis:6379
+    depends_on:
+      migrate-identity:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+
+  catalog:
+    build:
+      context: .
+      args:
+        SERVICE: catalog
+    image: smartcourse/catalog:dev
+    profiles: [app]
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      CATALOG_MONGO_URI: mongodb://mongo:27017/?directConnection=true
+    depends_on:
+      migrate-catalog:
+        condition: service_completed_successfully
+
+  gateway:
+    build:
+      context: .
+      args:
+        SERVICE: gateway
+    image: smartcourse/gateway:dev
+    profiles: [app]
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      GATEWAY_IDENTITY_URL: http://identity:${IDENTITY_PORT:-8081}
+      GATEWAY_CATALOG_URL: http://catalog:${CATALOG_PORT:-8082}
+    ports:
+      - "${GATEWAY_PORT:-8000}:${GATEWAY_PORT:-8000}"
+    depends_on:
+      identity:
+        condition: service_started
+      catalog:
+        condition: service_started
 
 volumes:
   postgres:
