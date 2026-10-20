@@ -86,7 +86,9 @@ Extra prerequisites: Go 1.27+, golangci-lint v2, and the migrate CLI built with 
 | `task check`                                   | Format + lint (run before every commit)                |
 | `task api:gen` / `task api:check`              | Regenerate the OpenAPI contract / fail if stale or lint errors |
 | `task api:lint`                                | Lint the OpenAPI contract                              |
-| `task test`                                    | Run tests                                              |
+| `task test`                                    | Unit tests (race detector, no dependencies)            |
+| `task test:integration`                        | Repository tests on real databases (testcontainers)    |
+| `task test:e2e`                                | End-to-end + OpenAPI contract tests (after `task up`)  |
 | `task admin:create -- -email ...`              | Create an admin account                                |
 
 ## API overview
@@ -114,6 +116,7 @@ cmd/<service>/         Entrypoints: gateway, identity, catalog, identity-admin, 
 internal/<service>/    Service code: config, model, repository, service, handler, policy
 internal/platform/     Shared libraries: config, postgres, mongodb, redisdb, auth, errs, problem, httpapi, web
 migrations/<service>/  golang-migrate files per database
+test/e2e/              End-to-end + contract tests against the running stack
 deploy/                Local infra bootstrap (Postgres databases)
 docs/                  Technical design
 ```

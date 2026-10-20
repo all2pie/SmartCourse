@@ -123,6 +123,16 @@ tasks:
       - go run ./cmd/{{.SERVICE}}
 
   test:
-    desc: Run tests
+    desc: Unit tests with the race detector (no external dependencies)
     cmds:
-      - go test ./... -v
+      - go test -race ./...
+
+  test:integration:
+    desc: Repository and token-store tests against real Postgres, MongoDB and Redis (testcontainers; needs Docker)
+    cmds:
+      - go test -race -tags integration ./internal/...
+
+  test:e2e:
+    desc: End-to-end + contract tests against the running stack (run `task up` first)
+    cmds:
+      - go test -count=1 -tags e2e ./test/e2e/... {{.CLI_ARGS}}

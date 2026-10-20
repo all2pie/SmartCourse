@@ -22,7 +22,9 @@ task check                              # format + lint; must be clean before co
 task api:gen                            # regenerate api/openapi.yaml after changing operations or DTOs
 task api:check                          # fail if the spec is stale or fails lint
 task api:lint                           # lint api/openapi.yaml
-task test
+task test                               # unit tests, -race, no external deps
+task test:integration                   # repositories/token store vs real Postgres, Mongo, Redis (testcontainers, needs Docker)
+task test:e2e                           # full flows + OpenAPI contract against `task up`
 task admin:create -- -email a@b.c
 ```
 
@@ -73,6 +75,11 @@ A second entity in the same aggregate gets `<entity>_model.go`, `_repository.go`
 **Style**
 - Explicit constructor wiring; no DI containers, no generic `Repository[T]`.
 - Comments only for what the code can't say, one short line.
+
+**Tests**
+- Prove a rule at the cheapest layer: policies, services (in-memory fakes in the package's `fake_test.go`) and Huma operations (`humatest.Wrap` around `httpapi.New`) are unit tests; repositories/stores are `//go:build integration` tests using `testutil.Postgres/Mongo/Redis`; whole flows live in `test/e2e` (`//go:build e2e`), which validates every response against `api/openapi.yaml`.
+- Standard library assertions + `go-cmp` for diffs; `internal/platform/testutil` is imported only from tests.
+- A behaviour change needs a test at the layer that owns it; an API change also needs `task api:gen` and an e2e assertion if it is user-visible.
 
 ## Security rules
 

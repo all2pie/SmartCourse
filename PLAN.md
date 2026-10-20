@@ -2,7 +2,7 @@
 
 Roadmap, open decisions and progress. For how the system works see [docs/design.md](docs/design.md); for conventions and workflow see [AGENTS.md](AGENTS.md). Scope comes from [Requirements.md](Requirements.md); the 3-week delivery structure (mentor review at the end of each week) from [Guidelines.md](Guidelines.md).
 
-**Now:** Week 1 item 1.10 (tests), then the Week 1 mentor review.
+**Now:** Week 1 mentor review; then Week 2 starts with 2.0 (decide D1–D4, D6).
 
 ## Open decisions
 
@@ -28,7 +28,7 @@ Roadmap, open decisions and progress. For how the system works see [docs/design.
 - [x] 1.7 Local setup: `task up` runs infra, migration jobs and all services in Docker
 - [x] 1.8 Docs: README, docs/design.md, AGENTS.md, OpenAPI 3.1 contract served at `/docs`
 - [x] 1.9 Code-first API with Huma + RFC 9457 errors (plan below)
-- [ ] 1.10 Tests (plan below)
+- [x] 1.10 Tests (plan below)
 - [ ] Week 1 mentor review
 
 ### Week 2 — Enrollment + publishing workflow
@@ -110,6 +110,8 @@ Goal: prove the rules that matter (access control, token security, session rotat
 
 **Done when:** all three layers pass locally, `go test -race ./...` is clean, Taskfile has `test`, `test:integration`, `test:e2e`, and the contract test fails if the spec and the API drift.
 
+**Outcome:** done as planned, with these simplifications: no clock injection was needed (`Tokens.Sign` already takes `now`, so expiry is tested by signing in the past); `restrictToVisible` is tested in-package and via the fake repository's recorded filter; migrations are applied in tests by a small reader of `migrations/<svc>` (SQL executed, Mongo JSON commands run) instead of the golang-migrate library; the e2e layer lives in `test/e2e`, also checks that the gateway serves the committed spec, and skips the Redis/Postgres internals the smoke script inspected via `docker exec` (covered by integration tests). Verified that the validator rejects wrong types, extra fields, the old `{"error"}` shape and undocumented statuses. golangci-lint now lints the tagged files too.
+
 ## Progress log
 
 | Date               | Milestone                                                                                                                       | Commit                |
@@ -125,4 +127,5 @@ Goal: prove the rules that matter (access control, token security, session rotat
 | 2026-10-20         | 1.8: README, design doc, AGENTS.md, OpenAPI 3.1 + Swagger UI at `/docs`; PLAN trimmed; migration 000004 deleted                 | `7902868`             |
 | 2026-10-20         | Migration 000003 deleted (no `refresh_tokens` table; local DB rolled back to v2); test tooling decided (go-cmp, testcontainers) | `4a86031`             |
 | 2026-10-20         | Decided O1: Huma code-first API + RFC 9457 errors (planned as 1.9; tests move to 1.10)                                          | `b50a9c6`             |
-| 2026-10-20         | 1.9: 10 operations on Huma, generated `api/openapi.yaml` (`task api:gen`/`api:check`), problem+json everywhere, `Invalid` → 422 | *(this commit)*       |
+| 2026-10-20         | 1.9: 10 operations on Huma, generated `api/openapi.yaml` (`task api:gen`/`api:check`), problem+json everywhere, `Invalid` → 422 | `625f603`             |
+| 2026-10-20         | 1.10: unit, integration (testcontainers) and e2e + OpenAPI contract tests; `task test`, `test:integration`, `test:e2e`        | *(this commit)*       |

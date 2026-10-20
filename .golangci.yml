@@ -1,5 +1,9 @@
 version: "2"
 
+run:
+  # Lint the integration and e2e test files too.
+  build-tags: [integration, e2e]
+
 linters:
   default: standard
   enable:
