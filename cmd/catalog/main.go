@@ -6,8 +6,10 @@ import (
 	"log"
 	"time"
 
+	"github.com/all2pie/go-smart-course/api"
 	"github.com/all2pie/go-smart-course/internal/catalog"
 	"github.com/all2pie/go-smart-course/internal/platform/config"
+	"github.com/all2pie/go-smart-course/internal/platform/httpapi"
 	"github.com/all2pie/go-smart-course/internal/platform/mongodb"
 	"github.com/all2pie/go-smart-course/internal/platform/web"
 )
@@ -34,7 +36,7 @@ func main() {
 		return db.Client().Ping(ctx, nil)
 	}))
 
-	catalog.NewHandler(catalog.NewService(catalog.NewRepository(db))).RegisterRoutes(router)
+	catalog.NewHandler(catalog.NewService(catalog.NewRepository(db))).Register(httpapi.New(router, "Catalog", api.Version))
 
 	log.Printf("catalog service starting: env=%s port=%d", cfg.AppEnv, cfg.Port)
 	if err := router.Run(fmt.Sprintf(":%d", cfg.Port)); err != nil {

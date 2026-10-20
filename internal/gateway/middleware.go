@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/all2pie/go-smart-course/internal/platform/auth"
+	"github.com/all2pie/go-smart-course/internal/platform/problem"
 	"github.com/all2pie/go-smart-course/internal/platform/web"
 )
 
@@ -58,5 +59,6 @@ func Authenticate(tokens *auth.Tokens) gin.HandlerFunc {
 
 func unauthorized(c *gin.Context) {
 	c.Header("WWW-Authenticate", `Bearer realm="smartcourse"`)
-	c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "authentication required"})
+	problem.Write(c.Writer, http.StatusUnauthorized, "authentication required")
+	c.Abort()
 }

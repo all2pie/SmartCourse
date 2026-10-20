@@ -15,11 +15,11 @@ const (
 )
 
 type Course struct {
-	ID           uuid.UUID `bson:"_id"           json:"id"`
-	InstructorID uuid.UUID `bson:"instructor_id" json:"instructor_id"`
-	Title        string    `bson:"title"         json:"title"`
-	Description  string    `bson:"description"   json:"description"`
-	Status       Status    `bson:"status"        json:"status"`
-	CreatedAt    time.Time `bson:"created_at"    json:"created_at"`
-	UpdatedAt    time.Time `bson:"updated_at"    json:"updated_at"`
+	ID           uuid.UUID `bson:"_id"`
+	InstructorID uuid.UUID `bson:"instructor_id"`
+	Title        string    `bson:"title"`
+	Description  string    `bson:"description"`
+	Status       Status    `bson:"status"`
+	CreatedAt    time.Time `bson:"created_at"`
+	UpdatedAt    time.Time `bson:"updated_at"`
 }

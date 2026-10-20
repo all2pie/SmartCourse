@@ -6,9 +6,11 @@ import (
 	"log"
 	"time"
 
+	"github.com/all2pie/go-smart-course/api"
 	"github.com/all2pie/go-smart-course/internal/identity"
 	"github.com/all2pie/go-smart-course/internal/platform/auth"
 	"github.com/all2pie/go-smart-course/internal/platform/config"
+	"github.com/all2pie/go-smart-course/internal/platform/httpapi"
 	"github.com/all2pie/go-smart-course/internal/platform/postgres"
 	"github.com/all2pie/go-smart-course/internal/platform/redisdb"
 	"github.com/all2pie/go-smart-course/internal/platform/web"
@@ -59,7 +61,7 @@ func main() {
 		return rdb.Ping(ctx).Err()
 	}))
 
-	identity.NewHandler(identity.NewService(users), authSvc).RegisterRoutes(router)
+	identity.NewHandler(identity.NewService(users), authSvc).Register(httpapi.New(router, "Identity", api.Version))
 
 	log.Printf("identity service starting: env=%s port=%d", cfg.AppEnv, cfg.Port)
 	if err := router.Run(fmt.Sprintf(":%d", cfg.Port)); err != nil {

@@ -8,10 +8,10 @@ type RefreshToken struct {
 	FamilyID uuid.UUID
 }
 
-// TokenPair is the login/refresh response body (OAuth 2.0 token response field names).
+// TokenPair is the result of a login or refresh.
 type TokenPair struct {
-	AccessToken  string `json:"access_token"`
-	TokenType    string `json:"token_type"`
-	ExpiresIn    int    `json:"expires_in"`
-	RefreshToken string `json:"refresh_token"`
+	AccessToken  string
+	TokenType    string
+	ExpiresIn    int
+	RefreshToken string
 }

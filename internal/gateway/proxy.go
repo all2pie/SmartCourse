@@ -9,6 +9,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/all2pie/go-smart-course/internal/platform/auth"
+	"github.com/all2pie/go-smart-course/internal/platform/problem"
 )
 
 // RegisterRoutes forwards paths, unchanged, to the owning service. Only the routes listed
@@ -36,9 +37,7 @@ func newProxy(target url.URL) gin.HandlerFunc {
 		},
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
 			log.Printf("proxy %s %q to %s: %v", r.Method, r.URL.Path, target.Host, err)
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusBadGateway)
-			_, _ = w.Write([]byte(`{"error":"upstream unavailable"}`))
+			problem.Write(w, http.StatusBadGateway, "upstream unavailable")
 		},
 	}
 

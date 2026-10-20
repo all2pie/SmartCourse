@@ -93,10 +93,22 @@ tasks:
     desc: Format + lint (run before every commit)
     deps: [fmt, lint]
 
+  api:gen:
+    desc: Regenerate api/openapi.yaml from the services' Huma operations
+    cmds:
+      - go run ./cmd/openapi -o api/openapi.yaml
+
   api:lint:
     desc: Lint the OpenAPI contract (api/openapi.yaml)
     cmds:
       - docker run --rm -v "{{.ROOT_DIR}}/api:/spec:ro" redocly/cli:2.65.1 lint --config /spec/redocly.yaml /spec/openapi.yaml
+
+  api:check:
+    desc: Fail if api/openapi.yaml is stale or fails lint
+    cmds:
+      - task: api:gen
+      - git diff --exit-code api/openapi.yaml
+      - task: api:lint
 
   build:
     desc: Build every service binary into bin/

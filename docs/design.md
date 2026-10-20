@@ -57,10 +57,12 @@ Solid lines exist today; dotted lines arrive in the week shown.
 One Go module, one binary per service (`cmd/<service>`), service code in `internal/<service>`, shared libraries in `internal/platform`. Inside a service the layers are:
 
 ```
-handler (Gin, request/response types)  →  service (business rules, policy.go)  →  repository / store (persistence)
+handler (Huma operations, request/response DTOs)  →  service (business rules, policy.go)  →  repository / store (persistence)
 ```
 
-Handlers return errors instead of writing them; `web.Wrap` maps transport-agnostic error kinds (`errs.NotFound`, `Invalid`, `Conflict`, `Unauthenticated`, `Forbidden`) to HTTP statuses in one place, and unknown errors become a generic 500 so internals never leak.
+Handlers are typed [Huma](https://huma.rocks) operations mounted on Gin: Huma binds and validates requests from struct tags and generates the OpenAPI document from the same types, so routes, validation and docs cannot drift. Request and response DTOs are separate from storage models, so persistence changes never leak into the API.
+
+Handlers return errors instead of writing them. `httpapi.Register` converts them with `problem.From`, which maps transport-agnostic error kinds (`errs.NotFound` 404, `Invalid` 422, `Conflict` 409, `Unauthenticated` 401, `Forbidden` 403) in one place; unknown errors are logged and become a generic 500 so internals never leak.
 
 ## 3. Request flow
 
@@ -73,7 +75,7 @@ sequenceDiagram
     G->>G: assign X-Request-ID, drop client X-User-* headers
     G->>G: verify JWT (HS256, issuer, expiry)
     G->>S: GET /courses<br/>X-User-ID, X-User-Role, X-Request-ID<br/>(Authorization removed)
-    S->>S: web.Actor → policy → repository
+    S->>S: httpapi.Actor → policy → repository
     S-->>G: 200 {items,total,limit,offset}
     G-->>C: 200 + X-Request-ID
 ```
@@ -81,7 +83,7 @@ sequenceDiagram
 - **Secure by default:** only `POST /auth/{register,login,refresh,logout}`, `/ping`, `/docs` and `/openapi.yaml` are public. Every other proxied route sits behind `Authenticate`; a new route is protected unless explicitly added to the public list.
 - **Header trust:** services trust `X-User-ID` / `X-User-Role` because only the gateway can reach them (only its port is published) and it always strips client-sent copies. Calling a service directly without these headers returns 401.
 - **Request IDs:** a client-sent `X-Request-ID` is kept only if it is a UUID (so arbitrary strings never reach logs); otherwise one is generated. It is forwarded and echoed.
-- **Upstream failure:** if a service is unreachable the gateway returns `502 {"error":"upstream unavailable"}`.
+- **Upstream failure:** if a service is unreachable the gateway returns a `502` problem (`"detail": "upstream unavailable"`).
 
 ## 4. Identity and sessions
 
@@ -179,11 +181,12 @@ Keys are namespaced by owning service (`identity:` today; `gateway:` for rate li
 ## 7. Cross-cutting concerns
 
 - **Configuration:** environment variables parsed into a per-service struct (`config.Load[T]`); service variables are prefixed (`IDENTITY_DB_NAME`), shared ones are not (`JWT_SECRET`). A root `.env` is loaded for local development only.
-- **Validation:** Gin binding tags at the edge, domain rules in services.
+- **Validation:** Huma validates requests against the generated JSON Schema (struct tags such as `minLength`, `format:"email"`, `enum`) and rejects unknown fields; domain rules stay in services. Malformed JSON is a 400; a well-formed request that fails validation is a 422 listing each failing field.
+- **Errors:** every error, from services, Huma validation, the gateway (401, 502) and router fallbacks (404, 405, panics), is an RFC 9457 problem (`application/problem+json`, Huma's `ErrorModel`: `title`, `status`, `detail`, optional `errors[]` with `location`/`message`/`value`). `type` is the RFC default `about:blank`.
 - **Pagination:** `limit`/`offset`, default 20, max 100, response `{items,total,limit,offset}` with `items` never `null`.
 - **Secrets in logs:** GORM logs SQL with placeholders only; tokens and password hashes are never logged or serialized.
 - **Health:** every service exposes `/ping`; Identity and Catalog also expose `/health/<dependency>` (`/health/db`, and `/health/redis` on Identity).
-- **API contract:** [api/openapi.yaml](../api/openapi.yaml) (OpenAPI 3.1) is hand-written spec-first, linted with Redocly (`task api:lint`), and served by the gateway at `/openapi.yaml` with Swagger UI at `/docs` (UI assets load from the unpkg CDN, pinned version).
+- **API contract:** [api/openapi.yaml](../api/openapi.yaml) (OpenAPI 3.1) is generated code-first: `cmd/openapi` registers every service's Huma operations onto one API (a path or schema-name clash between services panics), adds gateway-level parts (servers, `/ping`, 502s, `WWW-Authenticate`) and writes the file (`task api:gen`). `task api:check` fails if the committed file is stale or Redocly lint fails. The gateway serves it at `/openapi.yaml` with Swagger UI at `/docs` (UI assets load from the unpkg CDN, pinned version); services expose no docs routes.
 
 ## 8. Local environment and delivery
 
@@ -208,7 +211,7 @@ Keys are namespaced by owning service (`identity:` today; `gateway:` for rate li
 | A10 | Sessions             | Short JWT + rotating refresh tokens in Redis                 | Revocable sessions and theft detection; parallel refresh = logout (see §4.2)  |
 | A11 | Gateway auth         | Secure by default (explicit public allowlist)                | New routes can't be accidentally exposed                                      |
 | A12 | Admin bootstrap      | Operator CLI                                                 | No standing admin credentials in config or over HTTP                          |
-| —   | API docs             | Spec-first OpenAPI 3.1 + Swagger UI                          | No annotation noise or codegen coupling; contract tests (1.9) keep it honest  |
+| O1  | API definition       | Code-first with Huma v2 on Gin; RFC 9457 errors               | One source for routing, validation and docs; rejected swaggest (separate operation list), swaggo (Swagger 2.0), Fuego (pre-1.0), hand-written spec (drifts) |
 
 Open domain decisions (publishing, lessons, enrollment rules, search) are tracked in [PLAN.md](../PLAN.md).
 

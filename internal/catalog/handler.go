@@ -1,16 +1,17 @@
 package catalog
 
 import (
+	"context"
 	"net/http"
+	"time"
 
-	"github.com/gin-gonic/gin"
+	"github.com/danielgtaylor/huma/v2"
 	"github.com/google/uuid"
 
-	"github.com/all2pie/go-smart-course/internal/platform/errs"
-	"github.com/all2pie/go-smart-course/internal/platform/web"
+	"github.com/all2pie/go-smart-course/internal/platform/httpapi"
 )
 
-var errInvalidID = errs.New(errs.Invalid, "invalid course id")
+var tags = []string{"courses"}
 
 type Handler struct {
 	service *Service
@@ -20,117 +21,179 @@ func NewHandler(service *Service) *Handler {
 	return &Handler{service: service}
 }
 
-func (h *Handler) RegisterRoutes(router gin.IRouter) {
-	router.POST("/courses", web.Wrap(h.create))
-	router.GET("/courses", web.Wrap(h.list))
-	router.GET("/courses/:id", web.Wrap(h.getByID))
-	router.PATCH("/courses/:id", web.Wrap(h.update))
+func (h *Handler) Register(api huma.API) {
+	httpapi.Register(api, httpapi.Protected(huma.Operation{
+		OperationID:   "createCourse",
+		Method:        http.MethodPost,
+		Path:          "/courses",
+		Tags:          tags,
+		Summary:       "Create a draft course (instructors only)",
+		Description:   "The caller becomes the course's instructor.",
+		DefaultStatus: http.StatusCreated,
+		Errors:        []int{http.StatusForbidden},
+	}), h.create)
+
+	httpapi.Register(api, httpapi.Protected(huma.Operation{
+		OperationID: "listCourses",
+		Method:      http.MethodGet,
+		Path:        "/courses",
+		Tags:        tags,
+		Summary:     "List courses visible to the caller",
+		Description: "Students see published courses; instructors also see their own courses in any status; " +
+			"admins see everything. Newest first.",
+	}), h.list)
+
+	httpapi.Register(api, httpapi.Protected(huma.Operation{
+		OperationID: "getCourse",
+		Method:      http.MethodGet,
+		Path:        "/courses/{id}",
+		Tags:        tags,
+		Summary:     "A course",
+		Description: "Courses the caller may not see return 404, so their existence isn't revealed.",
+		Errors:      []int{http.StatusNotFound},
+	}), h.getByID)
+
+	httpapi.Register(api, httpapi.Protected(huma.Operation{
+		OperationID: "updateCourse",
+		Method:      http.MethodPatch,
+		Path:        "/courses/{id}",
+		Tags:        tags,
+		Summary:     "Update a course's title or description",
+		Description: "Only the course's instructor or an admin. Omitted fields are unchanged; " +
+			"an empty description clears it; at least one field is required.",
+		Errors: []int{http.StatusForbidden, http.StatusNotFound},
+	}), h.update)
 }
 
-type createCourseRequest struct {
-	Title       string `json:"title"       binding:"required,max=255"`
-	Description string `json:"description"`
+type CourseResponse struct {
+	ID           uuid.UUID `json:"id"            format:"uuid"`
+	InstructorID uuid.UUID `json:"instructor_id" format:"uuid"`
+	Title        string    `json:"title"`
+	Description  string    `json:"description"`
+	Status       Status    `json:"status"        enum:"draft,published"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
 }
 
-func (h *Handler) create(c *gin.Context) error {
-	actor, err := web.Actor(c)
-	if err != nil {
-		return err
+func toCourseResponse(c *Course) CourseResponse {
+	return CourseResponse{
+		ID:           c.ID,
+		InstructorID: c.InstructorID,
+		Title:        c.Title,
+		Description:  c.Description,
+		Status:       c.Status,
+		CreatedAt:    c.CreatedAt,
+		UpdatedAt:    c.UpdatedAt,
 	}
-
-	req, err := web.Bind[createCourseRequest](c)
-	if err != nil {
-		return err
-	}
-
-	course, err := h.service.Create(c.Request.Context(), actor, CreateInput(req))
-	if err != nil {
-		return err
-	}
-
-	c.JSON(http.StatusCreated, course)
-	return nil
 }
 
-func (h *Handler) getByID(c *gin.Context) error {
-	actor, err := web.Actor(c)
-	if err != nil {
-		return err
-	}
-
-	id, err := uuid.Parse(c.Param("id"))
-	if err != nil {
-		return errInvalidID
-	}
-
-	course, err := h.service.GetByID(c.Request.Context(), actor, id)
-	if err != nil {
-		return err
-	}
-
-	c.JSON(http.StatusOK, course)
-	return nil
+type courseOutput struct {
+	Body CourseResponse
 }
 
-type updateCourseRequest struct {
-	Title       *string `json:"title"       binding:"omitempty,min=1,max=255"`
-	Description *string `json:"description"`
+type CreateCourseRequest struct {
+	Title       string `json:"title"                 minLength:"1" maxLength:"255"`
+	Description string `json:"description,omitempty"`
 }
 
-func (h *Handler) update(c *gin.Context) error {
-	actor, err := web.Actor(c)
-	if err != nil {
-		return err
-	}
-
-	id, err := uuid.Parse(c.Param("id"))
-	if err != nil {
-		return errInvalidID
-	}
-
-	req, err := web.Bind[updateCourseRequest](c)
-	if err != nil {
-		return err
-	}
-
-	course, err := h.service.Update(c.Request.Context(), actor, id, UpdateInput(req))
-	if err != nil {
-		return err
-	}
-
-	c.JSON(http.StatusOK, course)
-	return nil
+type createCourseInput struct {
+	Body CreateCourseRequest
 }
 
-type listCoursesQuery struct {
-	InstructorID *uuid.UUID `form:"instructor_id,parser=encoding.TextUnmarshaler"`
-	Limit        int        `form:"limit"                                         binding:"omitempty,min=1,max=100"`
-	Offset       int        `form:"offset"                                        binding:"omitempty,min=0"`
+func (h *Handler) create(ctx context.Context, in *createCourseInput) (*courseOutput, error) {
+	actor, err := httpapi.Actor(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	c, err := h.service.Create(ctx, actor, CreateInput(in.Body))
+	if err != nil {
+		return nil, err
+	}
+	return &courseOutput{Body: toCourseResponse(c)}, nil
 }
 
-type listCoursesResponse struct {
-	Items  []Course `json:"items"`
-	Total  int64    `json:"total"`
-	Limit  int      `json:"limit"`
-	Offset int      `json:"offset"`
+type courseIDInput struct {
+	ID uuid.UUID `path:"id" format:"uuid"`
 }
 
-func (h *Handler) list(c *gin.Context) error {
-	actor, err := web.Actor(c)
+func (h *Handler) getByID(ctx context.Context, in *courseIDInput) (*courseOutput, error) {
+	actor, err := httpapi.Actor(ctx)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	q, err := web.BindQuery[listCoursesQuery](c)
+	c, err := h.service.GetByID(ctx, actor, in.ID)
 	if err != nil {
-		return err
+		return nil, err
+	}
+	return &courseOutput{Body: toCourseResponse(c)}, nil
+}
+
+type UpdateCourseRequest struct {
+	Title       *string `json:"title,omitempty"       minLength:"1" maxLength:"255"`
+	Description *string `json:"description,omitempty"`
+}
+
+type updateCourseInput struct {
+	ID   uuid.UUID `path:"id" format:"uuid"`
+	Body UpdateCourseRequest
+}
+
+func (h *Handler) update(ctx context.Context, in *updateCourseInput) (*courseOutput, error) {
+	actor, err := httpapi.Actor(ctx)
+	if err != nil {
+		return nil, err
 	}
 
-	res, err := h.service.List(c.Request.Context(), actor, ListInput(q))
+	c, err := h.service.Update(ctx, actor, in.ID, UpdateInput(in.Body))
 	if err != nil {
-		return err
+		return nil, err
+	}
+	return &courseOutput{Body: toCourseResponse(c)}, nil
+}
+
+type listCoursesInput struct {
+	InstructorID uuid.UUID `query:"instructor_id" format:"uuid" doc:"Only courses of this instructor."`
+	Limit        int       `query:"limit"         minimum:"1"   maximum:"100"                            default:"20"`
+	Offset       int       `query:"offset"        minimum:"0"   default:"0"`
+}
+
+type CourseListResponse struct {
+	Items  []CourseResponse `json:"items"`
+	Total  int64            `json:"total"`
+	Limit  int              `json:"limit"`
+	Offset int              `json:"offset"`
+}
+
+type courseListOutput struct {
+	Body CourseListResponse
+}
+
+func (h *Handler) list(ctx context.Context, in *listCoursesInput) (*courseListOutput, error) {
+	actor, err := httpapi.Actor(ctx)
+	if err != nil {
+		return nil, err
 	}
 
-	c.JSON(http.StatusOK, listCoursesResponse(res))
-	return nil
+	f := ListInput{Limit: in.Limit, Offset: in.Offset}
+	if in.InstructorID != uuid.Nil {
+		f.InstructorID = &in.InstructorID
+	}
+
+	res, err := h.service.List(ctx, actor, f)
+	if err != nil {
+		return nil, err
+	}
+
+	items := make([]CourseResponse, 0, len(res.Items))
+	for i := range res.Items {
+		items = append(items, toCourseResponse(&res.Items[i]))
+	}
+	return &courseListOutput{Body: CourseListResponse{
+		Items:  items,
+		Total:  res.Total,
+		Limit:  res.Limit,
+		Offset: res.Offset,
+	}}, nil
 }

@@ -37,7 +37,8 @@ task up          # builds images, runs migrations, starts everything
 ```
 
 - API docs (Swagger UI): <http://localhost:8000/docs>
-- OpenAPI contract: <http://localhost:8000/openapi.yaml> (source: [api/openapi.yaml](api/openapi.yaml))
+- OpenAPI contract: <http://localhost:8000/openapi.yaml> (generated from the Go operations into [api/openapi.yaml](api/openapi.yaml) by `task api:gen`)
+- Errors are [RFC 9457](https://www.rfc-editor.org/rfc/rfc9457) problem details (`application/problem+json`): malformed JSON is a 400, failed validation a 422 listing the fields in `errors`.
 
 Try it:
 
@@ -83,6 +84,7 @@ Extra prerequisites: Go 1.27+, golangci-lint v2, and the migrate CLI built with 
 | `task build`                                   | Build all binaries into `bin/`                         |
 | `task migrate:up\|down\|create SERVICE=<name>` | Database migrations (SQL for Postgres, JSON for Mongo) |
 | `task check`                                   | Format + lint (run before every commit)                |
+| `task api:gen` / `task api:check`              | Regenerate the OpenAPI contract / fail if stale or lint errors |
 | `task api:lint`                                | Lint the OpenAPI contract                              |
 | `task test`                                    | Run tests                                              |
 | `task admin:create -- -email ...`              | Create an admin account                                |
@@ -107,10 +109,10 @@ Full request/response schemas: [api/openapi.yaml](api/openapi.yaml).
 ## Project layout
 
 ```
-api/                   OpenAPI contract (embedded and served by the gateway)
-cmd/<service>/         Entrypoints: gateway, identity, catalog, identity-admin
+api/                   Generated OpenAPI contract (embedded and served by the gateway)
+cmd/<service>/         Entrypoints: gateway, identity, catalog, identity-admin, openapi (spec generator)
 internal/<service>/    Service code: config, model, repository, service, handler, policy
-internal/platform/     Shared libraries: config, postgres, mongodb, redisdb, auth, errs, web
+internal/platform/     Shared libraries: config, postgres, mongodb, redisdb, auth, errs, problem, httpapi, web
 migrations/<service>/  golang-migrate files per database
 deploy/                Local infra bootstrap (Postgres databases)
 docs/                  Technical design
@@ -118,7 +120,7 @@ docs/                  Technical design
 
 ## Tech stack
 
-Go 1.27 · Gin · PostgreSQL 16 + GORM · MongoDB 8 (official driver v2) · Redis 8 (go-redis v9) · JWT (golang-jwt v5) + bcrypt · golang-migrate · Docker Compose · go-task · golangci-lint v2 · OpenAPI 3.1 + Swagger UI.
+Go 1.27 · Gin + Huma v2 · PostgreSQL 16 + GORM · MongoDB 8 (official driver v2) · Redis 8 (go-redis v9) · JWT (golang-jwt v5) + bcrypt · golang-migrate · Docker Compose · go-task · golangci-lint v2 · OpenAPI 3.1 + Swagger UI.
 
 Planned: Temporal (publish workflow), Kafka (events), Asynq (background jobs), OpenTelemetry + Prometheus/Grafana + Jaeger.
 
