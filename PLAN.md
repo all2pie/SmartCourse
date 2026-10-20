@@ -2,20 +2,19 @@
 
 Roadmap, open decisions and progress. For how the system works see [docs/design.md](docs/design.md); for conventions and workflow see [AGENTS.md](AGENTS.md). Scope comes from [Requirements.md](Requirements.md); the 3-week delivery structure (mentor review at the end of each week) from [Guidelines.md](Guidelines.md).
 
-**Now:** decide O1, then Week 1 item 1.9 (tests). Next after that: Week 1 mentor review.
+**Now:** Week 1 item 1.9 (code-first API with Huma), then 1.10 (tests), then the Week 1 mentor review.
 
 ## Open decisions
 
-| #   | Decision                      | Proposal                                                                                                                   | Needed by    |
-| --- | ----------------------------- | -------------------------------------------------------------------------------------------------------------------------- | ------------ |
-| O1  | OpenAPI source of truth       | Generate the spec from Go DTOs (code-first) instead of hand-writing it; options in chat 2026-10-20. Decide before 1.9 because it shapes handlers and the contract tests | 1.9 |
-| D1  | Editing a published course    | Draft revision + republish; students see the last published version                                                        | Week 2       |
-| D2  | Lesson types                  | Video, document, article, external link; no quizzes                                                                        | Week 2       |
-| D3  | Lesson files                  | Uploads to MinIO via presigned URLs                                                                                        | Week 2       |
-| D4  | Enrollment rules              | Free self-enrollment; optional capacity and prerequisites; drop and re-enroll with history                                 | Week 2       |
-| D6  | Search                        | MongoDB text index inside Catalog                                                                                          | Week 2       |
-| W1  | Workers                       | Which jobs use Asynq/Temporal vs a hand-rolled worker pool (the PRD wants concurrency demonstrated)                        | Week 3 (3.3) |
-| D5  | Completion                    | Student marks lessons complete → enrollment completed → certificate                                                        | Stretch      |
+| #   | Decision                   | Proposal                                                                                                                                                                | Needed by    |
+| --- | -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------ |
+| D1  | Editing a published course | Draft revision + republish; students see the last published version                                                                                                     | Week 2       |
+| D2  | Lesson types               | Video, document, article, external link; no quizzes                                                                                                                     | Week 2       |
+| D3  | Lesson files               | Uploads to MinIO via presigned URLs                                                                                                                                     | Week 2       |
+| D4  | Enrollment rules           | Free self-enrollment; optional capacity and prerequisites; drop and re-enroll with history                                                                              | Week 2       |
+| D6  | Search                     | MongoDB text index inside Catalog                                                                                                                                       | Week 2       |
+| W1  | Workers                    | Which jobs use Asynq/Temporal vs a hand-rolled worker pool (the PRD wants concurrency demonstrated)                                                                     | Week 3 (3.3) |
+| D5  | Completion                 | Student marks lessons complete → enrollment completed → certificate                                                                                                     | Stretch      |
 
 ## Roadmap
 
@@ -28,7 +27,8 @@ Roadmap, open decisions and progress. For how the system works see [docs/design.
 - [x] 1.6 Auth: register/login/refresh/logout, JWT + rotating refresh tokens (Redis), admin bootstrap
 - [x] 1.7 Local setup: `task up` runs infra, migration jobs and all services in Docker
 - [x] 1.8 Docs: README, docs/design.md, AGENTS.md, OpenAPI 3.1 contract served at `/docs`
-- [ ] 1.9 Tests (plan below)
+- [ ] 1.9 Code-first API with Huma + RFC 9457 errors (plan below)
+- [ ] 1.10 Tests (plan below)
 - [ ] Week 1 mentor review
 
 ### Week 2 — Enrollment + publishing workflow
@@ -57,21 +57,51 @@ Roadmap, open decisions and progress. For how the system works see [docs/design.
 - Graceful shutdown for all services; refresh-token grace window for parallel clients
 - Dedicated search engine if Mongo text search is not enough
 
-## 1.9 Test plan
+## 1.9 Code-first API with Huma
+
+**Decided (O1, 2026-10-20):** generate the OpenAPI spec from Go types with [Huma v2](https://huma.rocks) (`github.com/danielgtaylor/huma/v2`, on Gin via `adapters/humagin`), so routing, validation and docs come from one source and can't drift. Errors switch to **RFC 9457 problem details** (`application/problem+json`) with shared helpers. Done before 1.10 so tests target the final handler shape. Rejected: swaggest/openapi-go (operation list separate from routes, duplicated validation tags), swaggo (Swagger 2.0 only in stable), Fuego (pre-1.0), keeping the hand-written spec (drifts).
+
+**Steps**
+
+1. **`internal/platform/problem`: RFC 9457 helpers** (no Gin import, so the gateway and future workers can use it)
+   - One error shape everywhere: Huma's `ErrorModel` (`type`, `title`, `status`, `detail`, `instance`, `errors[]` with `location`/`message`/`value`), overriding `huma.NewError` once so Huma's own validation errors and ours match.
+   - `problem.From(err)`: maps `errs.Kind` sentinels to status + `detail` (replaces `web.statusFor`); unknown errors become a generic 500 and are logged, never exposed.
+   - Constructors for the common cases: `problem.BadRequest/NotFound/Forbidden/Conflict/Unauthorized(detail)`, `problem.Field(location, message, value)` for field errors.
+   - `problem.Write(w, status, detail)` for non-Huma paths: gateway 401/502, Gin 404/405, panic recovery.
+   - `type` stays `about:blank` (RFC default, `title` = HTTP status text); `instance` carries the request path. Add the request ID as an extension once logging lands (3.6).
+2. **`internal/platform/httpapi`: Huma setup shared by services**
+   - `httpapi.New(router, title, version) huma.API`: humagin, OpenAPI 3.1, `bearerAuth` scheme, service docs routes disabled (the gateway serves the single public doc).
+   - Actor middleware: reads the gateway's `X-User-*` into the request context; `httpapi.Actor(ctx)` replaces `web.Actor`. Internal headers stay out of the public spec.
+   - Small registration helpers (`httpapi.Public(op)`, `httpapi.Protected(op)`) that set tags and security consistently.
+3. **Convert handlers to typed operations** (Identity: 6, Catalog: 4)
+   - Request DTOs: `struct{ Body ...; ID string \`path:"id" format:"uuid"\`; Limit int \`query:"limit" minimum:"1" maximum:"100" default:"20"\` }` with validation tags (`minLength`, `maxLength`, `format:"email"`, `enum`) instead of Gin `binding` tags.
+   - **Response DTOs separate from storage models** (`UserResponse`, `CourseResponse`, `TokenResponse`) so schema changes in Postgres/Mongo never leak into the API; models lose their `json` tags.
+   - Status and headers in output structs (`Status int`, `CacheControl string \`header:"Cache-Control"\``) for 201/204 and `no-store`.
+   - Remove `web.Wrap`, `web.Bind`, `web.BindQuery`; keep `web.NewRouter` and `web.Health`.
+   - Behaviour changes to accept and document: validation failures return **422** (malformed JSON stays 400); unknown JSON fields are rejected; error bodies become problem+json.
+4. **Spec generation**
+   - `cmd/openapi` builds the Identity and Catalog Huma APIs without starting servers (registration needs no live dependencies), merges paths and components (fails on schema-name clashes), adds gateway-level parts (`/ping`, servers, security, gateway 401/502 responses), and writes `api/openapi.yaml`.
+   - `task api:gen` regenerates; `task api:check` = gen + `git diff --exit-code api/openapi.yaml` + Redocly lint. The hand-written spec is replaced by the generated file; the gateway keeps serving it at `/docs`.
+5. **Gateway**: same routing; its own errors (401, 502, unknown route) switch to `problem.Write`.
+6. **Docs and checks**: update design.md (§2.3, §7, decision O1), AGENTS.md (handler/DTO/error conventions), README (error format); update the smoke script for 422 and problem bodies.
+
+**Done when:** all 10 operations run through Huma, `api/openapi.yaml` is generated and `task api:check` passes, every error response (services and gateway) is problem+json, the 45-check smoke script passes against `task up`, and `task check` is clean.
+
+## 1.10 Test plan
 
 Goal: prove the rules that matter (access control, token security, session rotation, validation) at the cheapest layer that can prove them, and keep the OpenAPI contract honest.
 
-| Layer                 | Scope                                                                                                                                                                                                                                                                                                                                                                                                                                                                       | Deps                           | Build tag / task                             |
-| --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------ | -------------------------------------------- |
-| Unit                  | `policy.go` (both services); `auth.Tokens` (valid, expired, wrong secret, `alg` none/HS512, wrong issuer, no `exp`, bad `sub`/role, short secret); password/email rules; `web.Actor`, `web.WriteError` status mapping; gateway `RequestID`, `StripIdentityHeaders`, `Authenticate` via `httptest`; Catalog `Service` and Identity `Service`/`AuthService` with in-memory fakes (role checks, 404 vs 403, list filters per role, limit clamping, login/refresh/logout paths) | none                           | `task test` (`go test -race ./...`)          |
+| Layer                 | Scope                                                                                                                                                                                                                                                                                                                                                                                                                                                                       | Deps                                       | Build tag / task                             |
+| --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------ | -------------------------------------------- |
+| Unit                  | `policy.go` (both services); `auth.Tokens` (valid, expired, wrong secret, `alg` none/HS512, wrong issuer, no `exp`, bad `sub`/role, short secret); password/email rules; `problem.From` status mapping; Huma operations through `humatest` (validation → 422, actor middleware, problem bodies); gateway `RequestID`, `StripIdentityHeaders`, `Authenticate` via `httptest`; Catalog `Service` and Identity `Service`/`AuthService` with in-memory fakes (role checks, 404 vs 403, list filters per role, limit clamping, login/refresh/logout paths) | none                                       | `task test` (`go test -race ./...`)          |
 | Integration           | Identity Postgres repository (unique email → `ErrEmailTaken`), Catalog Mongo repository (UUID codec round-trip, visibility filter, pagination order), Redis `TokenStore` (rotate, reuse revokes family, TTLs, N concurrent rotations → exactly one wins)                                                                                                                                                                                                                    | real Postgres/Mongo/Redis (testcontainers) | `-tags integration`, `task test:integration` |
-| End-to-end + contract | Go port of the 45-check smoke script: register → login → courses → refresh/reuse → logout → admin, every response validated against `api/openapi.yaml` (`kin-openapi`)                                                                                                                                                                                                                                                                                                      | `task up`                      | `-tags e2e`, `task test:e2e`                 |
+| End-to-end + contract | Go port of the 45-check smoke script: register → login → courses → refresh/reuse → logout → admin, every response validated against `api/openapi.yaml` (`kin-openapi`)                                                                                                                                                                                                                                                                                                      | `task up`                                  | `-tags e2e`, `task test:e2e`                 |
 
 **Test utilities** (`internal/platform/testutil`, imported only from `_test.go` files). Decided: assertions with the standard library + `github.com/google/go-cmp` (T1: idiomatic per the Go team's test guidance, readable diffs, `cmpopts` for timestamps/IDs, no assertion-library lock-in); real databases via `testcontainers-go` (T2: self-contained, CI-ready, no dependency on a running stack).
 - `testutil.Actor(role)` / fixed UUIDs; `testutil.Tokens(t)` with a fixed 32-byte secret and a controllable clock.
-- HTTP: `testutil.Do(t, handler, method, path, body, headers)` → recorder; `testutil.JSON[T](t, rec)`.
+- HTTP: Huma's `humatest` for service operations; `testutil.Do(t, handler, method, path, body, headers)` → recorder for the gateway; `testutil.Problem(t, rec)` decodes and checks a problem+json body.
 - Containers: `testutil.Postgres(t, "identity")`, `testutil.Mongo(t)`, `testutil.Redis(t)`, each applying `migrations/<svc>` and cleaning up with `t.Cleanup`.
-- Contract: `testutil.OpenAPI(t)` loading `api/openapi.yaml` and validating `*http.Response`s.
+- Contract: `testutil.OpenAPI(t)` loading the generated `api/openapi.yaml` and validating `*http.Response`s (catches gateway-level drift that Huma can't see, e.g. 401/502 bodies).
 - Fakes stay in each package's `_test.go` files (in-memory `Repository` / `TokenStore`), not shared.
 
 **Small refactors for testability:** inject a clock into `auth.Tokens` and `AuthService` (expiry tests without sleeping); expose `restrictToVisible`'s filter to assert per-role queries.
@@ -80,15 +110,16 @@ Goal: prove the rules that matter (access control, token security, session rotat
 
 ## Progress log
 
-| Date               | Milestone                                                                                                         | Commit                |
-| ------------------ | ----------------------------------------------------------------------------------------------------------------- | --------------------- |
-| 2026-09-07 → 10-20 | Monolith foundation: tooling, Gin, Postgres + GORM + migrations, users and courses CRUD, shared error/web helpers | `6d02497` … `71333ec` |
-| 2026-10-20         | Switched to microservices + MongoDB; architecture and access rules approved (1.1)                                 | `79ac37b`             |
-| 2026-10-20         | 1.2 + 1.3: `internal/platform`, Identity service                                                                  | `e972e47`             |
-| 2026-10-20         | 1.4: Catalog on MongoDB with visibility/ownership rules                                                           | `38821b7`             |
-| 2026-10-20         | 1.5: Gateway reverse proxy, request IDs                                                                           | `dadd26a`             |
-| 2026-10-20         | 1.6: Auth (register/login/refresh/logout, JWT, admin CLI)                                                         | `039010b`             |
-| 2026-10-20         | Refresh tokens moved to Redis (atomic Lua rotation)                                                               | `417ce64`             |
-| 2026-10-20         | 1.7: Whole stack in Docker (`task up`)                                                                            | `a132521`             |
-| 2026-10-20         | 1.8: README, design doc, AGENTS.md, OpenAPI 3.1 + Swagger UI at `/docs`; PLAN trimmed; migration 000004 deleted   | `7902868`             |
-| 2026-10-20         | Migration 000003 deleted (no `refresh_tokens` table; local DB rolled back to v2); test tooling decided (go-cmp, testcontainers) | *(this commit)* |
+| Date               | Milestone                                                                                                                       | Commit                |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------- | --------------------- |
+| 2026-09-07 → 10-20 | Monolith foundation: tooling, Gin, Postgres + GORM + migrations, users and courses CRUD, shared error/web helpers               | `6d02497` … `71333ec` |
+| 2026-10-20         | Switched to microservices + MongoDB; architecture and access rules approved (1.1)                                               | `79ac37b`             |
+| 2026-10-20         | 1.2 + 1.3: `internal/platform`, Identity service                                                                                | `e972e47`             |
+| 2026-10-20         | 1.4: Catalog on MongoDB with visibility/ownership rules                                                                         | `38821b7`             |
+| 2026-10-20         | 1.5: Gateway reverse proxy, request IDs                                                                                         | `dadd26a`             |
+| 2026-10-20         | 1.6: Auth (register/login/refresh/logout, JWT, admin CLI)                                                                       | `039010b`             |
+| 2026-10-20         | Refresh tokens moved to Redis (atomic Lua rotation)                                                                             | `417ce64`             |
+| 2026-10-20         | 1.7: Whole stack in Docker (`task up`)                                                                                          | `a132521`             |
+| 2026-10-20         | 1.8: README, design doc, AGENTS.md, OpenAPI 3.1 + Swagger UI at `/docs`; PLAN trimmed; migration 000004 deleted                 | `7902868`             |
+| 2026-10-20         | Migration 000003 deleted (no `refresh_tokens` table; local DB rolled back to v2); test tooling decided (go-cmp, testcontainers) | `4a86031` |
+| 2026-10-20 | Decided O1: Huma code-first API + RFC 9457 errors (planned as 1.9; tests move to 1.10) | *(this commit)* |
