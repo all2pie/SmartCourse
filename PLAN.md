@@ -100,7 +100,7 @@ The PRD explicitly wants hand-rolled goroutines/channels/worker-pools/sync primi
 | 2026-09-30 | Boilerplate-reduction refactor: `internal/errs` (error kinds), `internal/web` (`Wrap`, `Bind[T]`, `WriteError`), `db.Model` embedding; `internal/user` migrated to them; conventions recorded in section 3                                                                                     | `5b433b8`          |
 | 2026-09-30 | Duplicate email now returns 409 (`user.ErrEmailTaken`, `errs.Conflict`) via GORM `TranslateError: true`; verified against Postgres                                                                                                                                                             | `5b433b8`          |
 | 2026-10-20 | Phase 3 slice 1: `courses` table migration (instructor_id FK, status draft/ready), `internal/course` (model/repository/service/handler), `POST /courses` + `GET /courses/:id`; FK violation → 400 via `TranslateError`; verified against Postgres                                              | `2f08052`          |
-| 2026-10-20 | Phase 3 slice 2: `PATCH /courses/:id` (partial update of title/description, `status` not client-editable) and `GET /courses` (limit/offset pagination, optional `instructor_id` filter, `{items,total,limit,offset}`); `web.BindQuery[T]` added; verified against Postgres, `task check` clean | *(pending commit)* |
+| 2026-10-20 | Phase 3 slice 2: `PATCH /courses/:id` (partial update of title/description, `status` not client-editable) and `GET /courses` (limit/offset pagination, optional `instructor_id` filter, `{items,total,limit,offset}`); `web.BindQuery[T]` added; verified against Postgres, `task check` clean | `71333ec` |
 
 **Current repo state:**
 ```
