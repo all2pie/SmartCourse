@@ -6,6 +6,7 @@ import (
 	"log"
 
 	"github.com/all2pie/go-smart-course/internal/identity"
+	"github.com/all2pie/go-smart-course/internal/platform/auth"
 	"github.com/all2pie/go-smart-course/internal/platform/config"
 	"github.com/all2pie/go-smart-course/internal/platform/postgres"
 	"github.com/all2pie/go-smart-course/internal/platform/web"
@@ -22,6 +23,16 @@ func main() {
 		log.Fatalf("failed to connect to database: %v", err)
 	}
 
+	tokens, err := auth.NewTokens(cfg.JWTSecret)
+	if err != nil {
+		log.Fatalf("invalid JWT_SECRET: %v", err)
+	}
+
+	svc, err := identity.NewService(identity.NewRepository(db), tokens, cfg.AccessTokenTTL, cfg.RefreshTokenTTL)
+	if err != nil {
+		log.Fatalf("failed to create service: %v", err)
+	}
+
 	router, err := web.NewRouter(cfg.AppEnv)
 	if err != nil {
 		log.Fatalf("failed to create router: %v", err)
@@ -35,7 +46,7 @@ func main() {
 		return sqlDB.PingContext(ctx)
 	}))
 
-	identity.NewHandler(identity.NewService(identity.NewRepository(db))).RegisterRoutes(router)
+	identity.NewHandler(svc).RegisterRoutes(router)
 
 	log.Printf("identity service starting: env=%s port=%d", cfg.AppEnv, cfg.Port)
 	if err := router.Run(fmt.Sprintf(":%d", cfg.Port)); err != nil {

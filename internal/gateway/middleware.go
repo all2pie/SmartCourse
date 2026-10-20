@@ -1,6 +1,9 @@
 package gateway
 
 import (
+	"net/http"
+	"strings"
+
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 
@@ -21,11 +24,39 @@ func RequestID() gin.HandlerFunc {
 	}
 }
 
-// StripIdentityHeaders drops client-sent caller headers; only the gateway may set them (after JWT checks in 1.6).
+// StripIdentityHeaders drops client-sent caller headers; only Authenticate may set them.
 func StripIdentityHeaders() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		c.Request.Header.Del(auth.HeaderUserID)
 		c.Request.Header.Del(auth.HeaderUserRole)
 		c.Next()
 	}
+}
+
+// Authenticate verifies the bearer access token and forwards the caller as X-User-* headers.
+// The token itself is not forwarded: services trust the gateway, not the client.
+func Authenticate(tokens *auth.Tokens) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		scheme, token, ok := strings.Cut(c.GetHeader("Authorization"), " ")
+		if !ok || !strings.EqualFold(scheme, "Bearer") {
+			unauthorized(c)
+			return
+		}
+
+		actor, err := tokens.Verify(token)
+		if err != nil {
+			unauthorized(c)
+			return
+		}
+
+		c.Request.Header.Del("Authorization")
+		c.Request.Header.Set(auth.HeaderUserID, actor.ID.String())
+		c.Request.Header.Set(auth.HeaderUserRole, string(actor.Role))
+		c.Next()
+	}
+}
+
+func unauthorized(c *gin.Context) {
+	c.Header("WWW-Authenticate", `Bearer realm="smartcourse"`)
+	c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "authentication required"})
 }

@@ -7,7 +7,8 @@ import (
 
 type User struct {
 	postgres.Model
-	Name  string    `gorm:"not null"                  json:"name"`
-	Email string    `gorm:"uniqueIndex;not null"      json:"email"`
-	Role  auth.Role `gorm:"type:varchar(50);not null" json:"role"`
+	Name         string    `gorm:"not null"                  json:"name"`
+	Email        string    `gorm:"uniqueIndex;not null"      json:"email,omitempty"`
+	PasswordHash string    `gorm:"not null"                  json:"-"`
+	Role         auth.Role `gorm:"type:varchar(50);not null" json:"role"`
 }

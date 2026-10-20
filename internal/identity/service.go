@@ -2,47 +2,49 @@ package identity
 
 import (
 	"context"
+	"fmt"
+	"time"
 
 	"github.com/google/uuid"
+	"golang.org/x/crypto/bcrypt"
 
 	"github.com/all2pie/go-smart-course/internal/platform/auth"
-	"github.com/all2pie/go-smart-course/internal/platform/errs"
 )
 
-var ErrInvalidRole = errs.New(errs.Invalid, "invalid role")
-
 type Service struct {
-	repo Repository
+	repo       Repository
+	tokens     *auth.Tokens
+	accessTTL  time.Duration
+	refreshTTL time.Duration
+	// dummyHash is compared against on unknown emails so login timing doesn't reveal which emails exist.
+	dummyHash []byte
+	now       func() time.Time
 }
 
-func NewService(repo Repository) *Service {
-	return &Service{repo: repo}
-}
-
-type CreateInput struct {
-	Name  string
-	Email string
-	Role  auth.Role
-}
-
-func (s *Service) Create(ctx context.Context, in CreateInput) (*User, error) {
-	if !in.Role.Valid() {
-		return nil, ErrInvalidRole
+func NewService(repo Repository, tokens *auth.Tokens, accessTTL, refreshTTL time.Duration) (*Service, error) {
+	dummy, err := bcrypt.GenerateFromPassword([]byte("timing-equalizer"), bcrypt.DefaultCost)
+	if err != nil {
+		return nil, fmt.Errorf("generating dummy hash: %w", err)
 	}
 
-	u := &User{
-		Name:  in.Name,
-		Email: in.Email,
-		Role:  in.Role,
-	}
+	return &Service{
+		repo:       repo,
+		tokens:     tokens,
+		accessTTL:  accessTTL,
+		refreshTTL: refreshTTL,
+		dummyHash:  dummy,
+		now:        func() time.Time { return time.Now().UTC() },
+	}, nil
+}
 
-	if err := s.repo.Create(ctx, u); err != nil {
+// GetByID hides the email unless the actor may see it (see policy.go).
+func (s *Service) GetByID(ctx context.Context, actor auth.Actor, id uuid.UUID) (*User, error) {
+	u, err := s.repo.GetUserByID(ctx, id)
+	if err != nil {
 		return nil, err
 	}
-
+	if !canSeeEmail(actor, u) {
+		u.Email = ""
+	}
 	return u, nil
-}
-
-func (s *Service) GetByID(ctx context.Context, id uuid.UUID) (*User, error) {
-	return s.repo.GetByID(ctx, id)
 }

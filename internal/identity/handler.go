@@ -6,7 +6,6 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 
-	"github.com/all2pie/go-smart-course/internal/platform/auth"
 	"github.com/all2pie/go-smart-course/internal/platform/errs"
 	"github.com/all2pie/go-smart-course/internal/platform/web"
 )
@@ -20,38 +19,42 @@ func NewHandler(service *Service) *Handler {
 }
 
 func (h *Handler) RegisterRoutes(router gin.IRouter) {
-	router.POST("/users", web.Wrap(h.create))
+	router.POST("/auth/register", web.Wrap(h.register))
+	router.POST("/auth/login", web.Wrap(h.login))
+	router.POST("/auth/refresh", web.Wrap(h.refresh))
+	router.POST("/auth/logout", web.Wrap(h.logout))
+
+	router.GET("/users/me", web.Wrap(h.me))
 	router.GET("/users/:id", web.Wrap(h.getByID))
 }
 
-type createUserRequest struct {
-	Name  string    `json:"name"  binding:"required"`
-	Email string    `json:"email" binding:"required,email"`
-	Role  auth.Role `json:"role"  binding:"required"`
-}
-
-func (h *Handler) create(c *gin.Context) error {
-	req, err := web.Bind[createUserRequest](c)
+func (h *Handler) me(c *gin.Context) error {
+	actor, err := web.Actor(c)
 	if err != nil {
 		return err
 	}
 
-	u, err := h.service.Create(c.Request.Context(), CreateInput(req))
+	u, err := h.service.GetByID(c.Request.Context(), actor, actor.ID)
 	if err != nil {
 		return err
 	}
 
-	c.JSON(http.StatusCreated, u)
+	c.JSON(http.StatusOK, u)
 	return nil
 }
 
 func (h *Handler) getByID(c *gin.Context) error {
+	actor, err := web.Actor(c)
+	if err != nil {
+		return err
+	}
+
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
 		return errs.New(errs.Invalid, "invalid user id")
 	}
 
-	u, err := h.service.GetByID(c.Request.Context(), id)
+	u, err := h.service.GetByID(c.Request.Context(), actor, id)
 	if err != nil {
 		return err
 	}

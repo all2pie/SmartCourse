@@ -53,6 +53,12 @@ tasks:
     cmds:
       - migrate -path migrations/{{.SERVICE}} -database "{{.DB_URL}}" {{.ARGS}}
 
+  admin:create:
+    desc: 'Create an admin account; prompts for the password (usage: task admin:create -- -email admin@example.com -name "Site Admin")'
+    interactive: true
+    cmds:
+      - go run ./cmd/identity-admin {{.CLI_ARGS}}
+
   tidy:
     desc: Tidy go.mod/go.sum
     cmds:

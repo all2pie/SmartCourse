@@ -7,4 +7,5 @@ type Config struct {
 	Port        int     `env:"GATEWAY_PORT"                  envDefault:"8000"`
 	IdentityURL url.URL `env:"GATEWAY_IDENTITY_URL,required"`
 	CatalogURL  url.URL `env:"GATEWAY_CATALOG_URL,required"`
+	JWTSecret   string  `env:"JWT_SECRET,required"`
 }
