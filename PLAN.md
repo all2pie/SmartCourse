@@ -24,14 +24,14 @@ The project started as a modular monolith (one `cmd/api` binary, domain packages
 
 **Proposed service map** (coarse-grained; confirm via the open decisions below):
 
-| Service | Owns | Storage |
-|---|---|---|
-| Gateway | Single public entrypoint: JWT verification, routing, rate limiting | Redis |
-| Identity | Users, roles, credentials, issuing JWTs | Postgres |
-| Catalog | Courses, modules, lessons, publishing workflow, search | MongoDB (+ MinIO for lesson files) |
-| Enrollment | Enrollments, rules, progress, certificates | Postgres |
-| Analytics | PRD metrics, computed from events | MongoDB |
-| Notification | Async delivery via worker pool | Redis (Asynq) |
+| Service      | Owns                                                               | Storage                            |
+| ------------ | ------------------------------------------------------------------ | ---------------------------------- |
+| Gateway      | Single public entrypoint: JWT verification, routing, rate limiting | Redis                              |
+| Identity     | Users, roles, credentials, issuing JWTs                            | Postgres                           |
+| Catalog      | Courses, modules, lessons, publishing workflow, search             | MongoDB (+ MinIO for lesson files) |
+| Enrollment   | Enrollments, rules, progress, certificates                         | Postgres                           |
+| Analytics    | PRD metrics, computed from events                                  | MongoDB                            |
+| Notification | Async delivery via worker pool                                     | Redis (Asynq)                      |
 
 Terminology follows Guidelines.md: a course contains ordered **modules**, a module contains ordered **lessons** (the PRD's "learning assets").
 
@@ -43,7 +43,7 @@ Terminology follows Guidelines.md: a course contains ordered **modules**, a modu
 5. **The gateway authenticates, services authorize.** The gateway verifies the JWT and forwards user id and role; role and ownership rules live in the service that owns the data.
 6. **Shared code is a library, never a service,** and holds no business logic. No `pkg/` unless something is genuinely for external reuse.
 
-### Service and data-ownership map (item 1.1, drafted 2026-10-20, awaiting owner review)
+### Service and data-ownership map (item 1.1, approved by the owner 2026-10-20)
 
 ```mermaid
 flowchart LR
@@ -66,14 +66,14 @@ flowchart LR
 ```
 Solid lines are Week 1; dotted lines arrive in the week shown.
 
-| Service | Owns (source of truth) | Store | Public routes via gateway | Week |
-|---|---|---|---|---|
-| Gateway | Nothing persistent (rate-limit state in Redis, W3) | — | All; the only published port | 1 |
-| Identity | `users`: id, name, email (unique), role, password_hash, timestamps | Postgres database `identity` | `POST /auth/register`, `POST /auth/login`, `GET /users/me`, `GET /users/:id` | 1 |
-| Catalog | `courses` documents: id, instructor_id, title, description, status, modules[ lessons[] ], timestamps | Mongo database `catalog` | `POST/GET /courses`, `GET/PATCH /courses/:id` (W1); modules, lessons, publish (W2) | 1 |
-| Enrollment | enrollments, progress, outbox, local course replica | Postgres database `enrollment` | `/enrollments` | 2 |
-| Analytics | raw events, metric aggregates | Mongo database `analytics` | `/analytics/*` | 3 |
-| Notification | notification jobs and delivery log | Redis (Asynq) | none (event-driven only) | 3 |
+| Service      | Owns (source of truth)                                                                               | Store                          | Public routes via gateway                                                          | Week |
+| ------------ | ---------------------------------------------------------------------------------------------------- | ------------------------------ | ---------------------------------------------------------------------------------- | ---- |
+| Gateway      | Nothing persistent (rate-limit state in Redis, W3)                                                   | —                              | All; the only published port                                                       | 1    |
+| Identity     | `users`: id, name, email (unique), role, password_hash, timestamps                                   | Postgres database `identity`   | `POST /auth/register`, `POST /auth/login`, `GET /users/me`, `GET /users/:id`       | 1    |
+| Catalog      | `courses` documents: id, instructor_id, title, description, status, modules[ lessons[] ], timestamps | Mongo database `catalog`       | `POST/GET /courses`, `GET/PATCH /courses/:id` (W1); modules, lessons, publish (W2) | 1    |
+| Enrollment   | enrollments, progress, outbox, local course replica                                                  | Postgres database `enrollment` | `/enrollments`                                                                     | 2    |
+| Analytics    | raw events, metric aggregates                                                                        | Mongo database `analytics`     | `/analytics/*`                                                                     | 3    |
+| Notification | notification jobs and delivery log                                                                   | Redis (Asynq)                  | none (event-driven only)                                                           | 3    |
 
 Consequences of database-per-service:
 - **No cross-service foreign keys.** `courses.instructor_id` is an opaque reference to an Identity user. The old `courses.instructor_id → users.id` FK goes away; instead `instructor_id` is taken from the verified token, so it always names a real instructor at creation time.
@@ -82,21 +82,26 @@ Consequences of database-per-service:
 - **Analytics gets user counts from `user.registered` events**, not by querying Identity.
 - Services listen on internal ports only in Docker Compose; only the gateway's port is published.
 
+**Access rules (approved 2026-10-20):**
+- `GET /users/:id`: any logged-in user gets the public profile (id, name, role); `email` is included only for the user themselves or an admin. Everyone uses `GET /users/me` for their own details.
+- Course visibility: students see only `published` courses; instructors see their own courses in any status; admins see everything. In Week 1 every course is a draft, so a student's `GET /courses` is empty.
+- Self-registration allows `student` or `instructor` only; admin accounts are seeded, never self-registered.
+
 **Decisions** (A1–A5 confirmed by the owner on 2026-10-20):
 
-| # | Decision | Choice / recommendation | Needed by |
-|---|---|---|---|
-| A1 | Granularity | **Decided:** coarse (the 6 services above); split content/search/progress later if needed | Week 1 |
-| A2 | Catalog storage | **Decided:** MongoDB. A course is one document with ordered, embedded modules and lessons (reorder = array update); single-node replica set locally so transactions work | Week 1 |
-| A3 | Service-to-service protocol | **Decided:** REST for now. The gateway reverse-proxies to services; Protobuf only for Kafka schemas (Week 3). Goroutines/channels are not an option here: they only work inside one process, and each service is its own process | Week 1 |
-| A4 | Repo layout | **Decided:** monorepo, one Go module: `cmd/<service>`, `internal/<service>`, shared `internal/platform` | Week 1 |
-| A5 | JWT signing | **Decided:** HS256 with a secret held only by Identity and the gateway; RS256/JWKS as later hardening | Week 1 |
-| D1 | Editing a published course | Draft revision + republish; students see the last published version | Week 2 |
-| D2 | Lesson types | Video, document, article, external link; no quizzes | Week 2 |
-| D3 | Lesson files | Real uploads to MinIO via presigned URLs | Week 2 |
-| D4 | Enrollment rules | Free self-enrollment; optional capacity; optional prerequisite courses; drop and re-enroll with history; no payments or approval | Week 2 |
-| D5 | Completion | Student marks lessons complete; all complete → enrollment completed → certificate record | Stretch |
-| D6 | Search | MongoDB text index inside Catalog | Week 2 |
+| #   | Decision                    | Choice / recommendation                                                                                                                                                                                                          | Needed by |
+| --- | --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- |
+| A1  | Granularity                 | **Decided:** coarse (the 6 services above); split content/search/progress later if needed                                                                                                                                        | Week 1    |
+| A2  | Catalog storage             | **Decided:** MongoDB. A course is one document with ordered, embedded modules and lessons (reorder = array update); single-node replica set locally so transactions work                                                         | Week 1    |
+| A3  | Service-to-service protocol | **Decided:** REST for now. The gateway reverse-proxies to services; Protobuf only for Kafka schemas (Week 3). Goroutines/channels are not an option here: they only work inside one process, and each service is its own process | Week 1    |
+| A4  | Repo layout                 | **Decided:** monorepo, one Go module: `cmd/<service>`, `internal/<service>`, shared `internal/platform`                                                                                                                          | Week 1    |
+| A5  | JWT signing                 | **Decided:** HS256 with a secret held only by Identity and the gateway; RS256/JWKS as later hardening                                                                                                                            | Week 1    |
+| D1  | Editing a published course  | Draft revision + republish; students see the last published version                                                                                                                                                              | Week 2    |
+| D2  | Lesson types                | Video, document, article, external link; no quizzes                                                                                                                                                                              | Week 2    |
+| D3  | Lesson files                | Real uploads to MinIO via presigned URLs                                                                                                                                                                                         | Week 2    |
+| D4  | Enrollment rules            | Free self-enrollment; optional capacity; optional prerequisite courses; drop and re-enroll with history; no payments or approval                                                                                                 | Week 2    |
+| D5  | Completion                  | Student marks lessons complete; all complete → enrollment completed → certificate record                                                                                                                                         | Stretch   |
+| D6  | Search                      | MongoDB text index inside Catalog                                                                                                                                                                                                | Week 2    |
 
 ## 3. Running conventions (established, keep following these)
 
@@ -137,42 +142,42 @@ File layout per domain: `model.go`, `repository.go`, `service.go`, `handler.go` 
 | Task runner         | `go-task` (Taskfile)                            | Chosen over Make/plain scripts by owner                                                                                               |
 
 ### Decided in principle, not yet implemented
-| Concern              | Choice                                      | Notes                                                                                                                                         |
-| -------------------- | ------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| Relational DB        | PostgreSQL + GORM                           | Identity and Enrollment: relational, transactional, uniqueness constraints |
-| Document DB          | MongoDB                                     | Catalog (pending A2) and Analytics. Local dev runs a single-node replica set, which Mongo transactions require |
-| Object storage       | MinIO (S3-compatible)                       | Lesson files (pending D3) |
-| Auth                 | JWT (`golang-jwt/jwt/v5`) + bcrypt          | Week 1; signing pending A5 |
-| Cache/queues backing | Redis                                       | Not yet wired                                                                                                                                 |
-| Event streaming      | Kafka + Confluent Schema Registry           | Not yet wired                                                                                                                                 |
-| Durable workflows    | Temporal (Go SDK)                           | For the multi-step course-publish and enrollment sagas specifically                                                                           |
+| Concern              | Choice                                      | Notes                                                                                                                                                                                                                                      |
+| -------------------- | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Relational DB        | PostgreSQL + GORM                           | Identity and Enrollment: relational, transactional, uniqueness constraints                                                                                                                                                                 |
+| Document DB          | MongoDB                                     | Catalog (pending A2) and Analytics. Local dev runs a single-node replica set, which Mongo transactions require                                                                                                                             |
+| Object storage       | MinIO (S3-compatible)                       | Lesson files (pending D3)                                                                                                                                                                                                                  |
+| Auth                 | JWT (`golang-jwt/jwt/v5`) + bcrypt          | Week 1; signing pending A5                                                                                                                                                                                                                 |
+| Cache/queues backing | Redis                                       | Not yet wired                                                                                                                                                                                                                              |
+| Event streaming      | Kafka + Confluent Schema Registry           | Not yet wired                                                                                                                                                                                                                              |
+| Durable workflows    | Temporal (Go SDK)                           | For the multi-step course-publish and enrollment sagas specifically                                                                                                                                                                        |
 | Background jobs      | Asynq (Redis-based)                         | For simple fire-and-forget jobs (notifications, analytics bumps) — **not** RabbitMQ+native workers, redundant given Redis is already in-stack. Guidelines.md says "Celery", which is Python-only; Asynq is the Go equivalent the PRD lists |
-| Kafka client         | `twmb/franz-go`                             | Pure Go, no CGO, chosen over `confluent-kafka-go` (CGO/librdkafka) and `segmentio/kafka-go` (less actively maintained)                        |
-| Logging              | stdlib `log/slog`                           | Not yet wired                                                                                                                                 |
-| Observability        | OpenTelemetry + Prometheus/Grafana + Jaeger | Not yet wired                                                                                                                                 |
-| Validation           | `go-playground/validator`                   | In use through Gin's `binding` tags |
-| Migrations           | `golang-migrate/migrate`                    | In use for Postgres; one migrations directory per service from Week 1. Do NOT rely on GORM `AutoMigrate` |
+| Kafka client         | `twmb/franz-go`                             | Pure Go, no CGO, chosen over `confluent-kafka-go` (CGO/librdkafka) and `segmentio/kafka-go` (less actively maintained)                                                                                                                     |
+| Logging              | stdlib `log/slog`                           | Not yet wired                                                                                                                                                                                                                              |
+| Observability        | OpenTelemetry + Prometheus/Grafana + Jaeger | Not yet wired                                                                                                                                                                                                                              |
+| Validation           | `go-playground/validator`                   | In use through Gin's `binding` tags                                                                                                                                                                                                        |
+| Migrations           | `golang-migrate/migrate`                    | In use for Postgres; one migrations directory per service from Week 1. Do NOT rely on GORM `AutoMigrate`                                                                                                                                   |
 
 ### Open architectural question — flagged, not resolved
 The PRD explicitly wants hand-rolled goroutines/channels/worker-pools/sync primitives *demonstrated*, but Asynq/Temporal would otherwise implement that for you. **Decision needed before background processing work starts:** which specific workloads get a hand-rolled worker pool (learning exercise) vs. which lean on Asynq/Temporal (reliability, no reinvention). Suggested split floated in chat: Temporal for the stateful multi-step workflows (publish, enrollment saga), hand-rolled worker pools for simpler high-volume jobs (e.g. notification dispatch) where the concurrency patterns are the point. **Not yet decided — resolve at the start of Week 3 (item 3.3).**
 
 ## 5. Progress log
 
-| Date       | Milestone                                                                                                                                                                                                                                                                                      | Commit             |
-| ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------ |
-| 2026-09-07 | Project scaffolded: `cmd/api`, `internal/config`, module init                                                                                                                                                                                                                                  | `6d02497`          |
-| 2026-09-07 | Linting (`golangci-lint` v2) + formatting + Taskfile set up                                                                                                                                                                                                                                    | `6d02497`          |
-| 2026-09-07 | `.env` support end-to-end (godotenv + caarlos0/env), trimmed to only `APP_ENV` at the time                                                                                                                                                                                                     | `6d02497`          |
-| 2026-09-14 | Gin HTTP server added: `internal/server`, `GET /ping`, `Port` config field added (config-grows-with-consumer applied), `gin.SetMode` driven by `AppEnv`, trusted proxies disabled                                                                                                              | `ef3195a`          |
-| 2026-09-21 | Postgres config fields (`DB_HOST`/`DB_PORT`/`DB_USER`/`DB_PASSWORD`/`DB_NAME`) added to `Config` + `.env.example`                                                                                                                                                                              | `0e5dc72`          |
-| 2026-09-21 | `docker-compose.yml` (local Postgres) + `internal/db` package opening the GORM connection + `GET /health/db` route                                                                                                                                                                             | `0e5dc72`          |
-| 2026-09-21 | `task infra:up`/`infra:down` Taskfile tasks for Docker Compose                                                                                                                                                                                                                                 | `8f73fb6`          |
-| 2026-09-29 | `golang-migrate` wired (`task migrate:up`/`down`/`create`), first migration: `users` table (id, name, email, role CHECK-constrained, timestamps)                                                                                                                                               | `8c61a6a`          |
-| 2026-09-29 | `internal/user` domain package (model/repository/service/handler), `POST /users` + `GET /users/:id` wired into `server.go`, create+fetch round-trip verified against real Postgres                                                                                                             | `5b433b8`          |
-| 2026-09-30 | Boilerplate-reduction refactor: `internal/errs` (error kinds), `internal/web` (`Wrap`, `Bind[T]`, `WriteError`), `db.Model` embedding; `internal/user` migrated to them; conventions recorded in section 3                                                                                     | `5b433b8`          |
-| 2026-09-30 | Duplicate email now returns 409 (`user.ErrEmailTaken`, `errs.Conflict`) via GORM `TranslateError: true`; verified against Postgres                                                                                                                                                             | `5b433b8`          |
-| 2026-10-20 | Phase 3 slice 1: `courses` table migration (instructor_id FK, status draft/ready), `internal/course` (model/repository/service/handler), `POST /courses` + `GET /courses/:id`; FK violation → 400 via `TranslateError`; verified against Postgres                                              | `2f08052`          |
-| 2026-10-20 | Phase 3 slice 2: `PATCH /courses/:id` (partial update of title/description, `status` not client-editable) and `GET /courses` (limit/offset pagination, optional `instructor_id` filter, `{items,total,limit,offset}`); `web.BindQuery[T]` added; verified against Postgres, `task check` clean | `71333ec` |
+| Date       | Milestone                                                                                                                                                                                                                                                                                                                                                 | Commit                                                                                 |
+| ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| 2026-09-07 | Project scaffolded: `cmd/api`, `internal/config`, module init                                                                                                                                                                                                                                                                                             | `6d02497`                                                                              |
+| 2026-09-07 | Linting (`golangci-lint` v2) + formatting + Taskfile set up                                                                                                                                                                                                                                                                                               | `6d02497`                                                                              |
+| 2026-09-07 | `.env` support end-to-end (godotenv + caarlos0/env), trimmed to only `APP_ENV` at the time                                                                                                                                                                                                                                                                | `6d02497`                                                                              |
+| 2026-09-14 | Gin HTTP server added: `internal/server`, `GET /ping`, `Port` config field added (config-grows-with-consumer applied), `gin.SetMode` driven by `AppEnv`, trusted proxies disabled                                                                                                                                                                         | `ef3195a`                                                                              |
+| 2026-09-21 | Postgres config fields (`DB_HOST`/`DB_PORT`/`DB_USER`/`DB_PASSWORD`/`DB_NAME`) added to `Config` + `.env.example`                                                                                                                                                                                                                                         | `0e5dc72`                                                                              |
+| 2026-09-21 | `docker-compose.yml` (local Postgres) + `internal/db` package opening the GORM connection + `GET /health/db` route                                                                                                                                                                                                                                        | `0e5dc72`                                                                              |
+| 2026-09-21 | `task infra:up`/`infra:down` Taskfile tasks for Docker Compose                                                                                                                                                                                                                                                                                            | `8f73fb6`                                                                              |
+| 2026-09-29 | `golang-migrate` wired (`task migrate:up`/`down`/`create`), first migration: `users` table (id, name, email, role CHECK-constrained, timestamps)                                                                                                                                                                                                          | `8c61a6a`                                                                              |
+| 2026-09-29 | `internal/user` domain package (model/repository/service/handler), `POST /users` + `GET /users/:id` wired into `server.go`, create+fetch round-trip verified against real Postgres                                                                                                                                                                        | `5b433b8`                                                                              |
+| 2026-09-30 | Boilerplate-reduction refactor: `internal/errs` (error kinds), `internal/web` (`Wrap`, `Bind[T]`, `WriteError`), `db.Model` embedding; `internal/user` migrated to them; conventions recorded in section 3                                                                                                                                                | `5b433b8`                                                                              |
+| 2026-09-30 | Duplicate email now returns 409 (`user.ErrEmailTaken`, `errs.Conflict`) via GORM `TranslateError: true`; verified against Postgres                                                                                                                                                                                                                        | `5b433b8`                                                                              |
+| 2026-10-20 | Phase 3 slice 1: `courses` table migration (instructor_id FK, status draft/ready), `internal/course` (model/repository/service/handler), `POST /courses` + `GET /courses/:id`; FK violation → 400 via `TranslateError`; verified against Postgres                                                                                                         | `2f08052`                                                                              |
+| 2026-10-20 | Phase 3 slice 2: `PATCH /courses/:id` (partial update of title/description, `status` not client-editable) and `GET /courses` (limit/offset pagination, optional `instructor_id` filter, `{items,total,limit,offset}`); `web.BindQuery[T]` added; verified against Postgres, `task check` clean                                                            | `71333ec`                                                                              |
 | 2026-10-20 | Phase 3 slice 3: `modules` table migration (course_id FK ON DELETE CASCADE, `position`, UNIQUE(course_id, position)), `POST /courses/:id/modules` + `GET /courses/:id/modules` (ordered by position); position assigned server-side in a transaction that row-locks the parent course; 20 concurrent creates verified gap-free (1..N); `task check` clean | *(reverted 2026-10-20, never committed: content structure moves to MongoDB in Week 2)* |
 
 **Current repo state:**
@@ -207,7 +212,7 @@ Each week ends with a mentor review: submit, discuss feedback, refine, then move
 ### 🟢 Week 1 — Foundation + Core Services
 *Guidelines scope: system design and setup; user & course CRUD; role handling (student/instructor). Deliverables: service structure defined, DB schemas created, basic APIs working, local setup ready.*
 
-- [ ] **1.1 Finalize the architecture:** A1–A5 decided; service and data-ownership map drafted in section 2, awaiting owner review.
+- [x] **1.1 Finalize the architecture:** A1–A5 decided; service and data-ownership map and access rules approved (section 2).
 - [ ] **1.2 Restructure into services:** move shared code to `internal/platform` (config, db, errs, web); one `cmd/<service>` per service, each with its own config, port and database/migrations.
 - [ ] **1.3 Identity service:** users and roles (port `internal/user`).
 - [ ] **1.4 Catalog service:** course CRUD (port `internal/course`; reimplemented on MongoDB if A2 is MongoDB).
