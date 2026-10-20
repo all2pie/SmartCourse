@@ -43,7 +43,7 @@ File layout per domain: `model.go`, `repository.go`, `service.go`, `handler.go` 
 
 1. **Errors: return `errs` sentinels, never write HTTP status codes in domain code.**
    - Declare domain errors as package-level sentinels: `var ErrNotFound = errs.New(errs.NotFound, "course not found")`. Kinds: `errs.NotFound`, `errs.Invalid`, `errs.Conflict`, `errs.Internal`.
-   - Repositories translate ORM errors into these (e.g. `gorm.ErrRecordNotFound` → the domain's `ErrNotFound`; `gorm.ErrDuplicatedKey` → a `KindConflict` sentinel like `user.ErrEmailTaken` — `TranslateError: true` is set in `db.Connect`, so never inspect pgx/`23505` directly); unknown errors are wrapped with `fmt.Errorf("doing x: %w", err)` and surface as a generic 500.
+   - Repositories translate ORM errors into these (e.g. `gorm.ErrRecordNotFound` → the domain's `ErrNotFound`; `gorm.ErrDuplicatedKey` → an `errs.Conflict` sentinel like `user.ErrEmailTaken` — `TranslateError: true` is set in `db.Connect`, so never inspect pgx/`23505` directly); unknown errors are wrapped with `fmt.Errorf("doing x: %w", err)` and surface as a generic 500.
    - Services/handlers just `return err` — no per-handler `errors.Is` ladders. New status mapping goes in `web.statusFor` once, not in each domain.
    - `internal/errs` must stay free of Gin/HTTP imports so workers/Kafka consumers can reuse it.
 2. **Handlers: `func (h *Handler) x(c *gin.Context) error`, registered via `web.Wrap(h.x)`.** Decode JSON bodies with `web.Bind[reqType](c)` (returns an `errs.Invalid` error on bad input). Success paths write their own `c.JSON(...)` and `return nil`. Keep the per-domain request struct (with `binding` tags) separate from the service's input struct — don't put Gin tags on service types.
@@ -82,19 +82,19 @@ The PRD explicitly wants hand-rolled goroutines/channels/worker-pools/sync primi
 
 ## 5. Progress log
 
-| Date       | Milestone                                                                                                                                                                                                  | Commit             |
-| ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------ |
-| 2026-09-07 | Project scaffolded: `cmd/api`, `internal/config`, module init                                                                                                                                              | `6d02497`          |
-| 2026-09-07 | Linting (`golangci-lint` v2) + formatting + Taskfile set up                                                                                                                                                | `6d02497`          |
-| 2026-09-07 | `.env` support end-to-end (godotenv + caarlos0/env), trimmed to only `APP_ENV` at the time                                                                                                                 | `6d02497`          |
-| 2026-09-14 | Gin HTTP server added: `internal/server`, `GET /ping`, `Port` config field added (config-grows-with-consumer applied), `gin.SetMode` driven by `AppEnv`, trusted proxies disabled                          | `ef3195a`          |
-| 2026-09-21 | Postgres config fields (`DB_HOST`/`DB_PORT`/`DB_USER`/`DB_PASSWORD`/`DB_NAME`) added to `Config` + `.env.example`                                                                                          | `0e5dc72`          |
-| 2026-09-21 | `docker-compose.yml` (local Postgres) + `internal/db` package opening the GORM connection + `GET /health/db` route                                                                                         | `0e5dc72`          |
-| 2026-09-21 | `task infra:up`/`infra:down` Taskfile tasks for Docker Compose                                                                                                                                             | `8f73fb6`          |
-| 2026-09-29 | `golang-migrate` wired (`task migrate:up`/`down`/`create`), first migration: `users` table (id, name, email, role CHECK-constrained, timestamps)                                                           | `8c61a6a`          |
-| 2026-09-29 | `internal/user` domain package (model/repository/service/handler), `POST /users` + `GET /users/:id` wired into `server.go`, create+fetch round-trip verified against real Postgres                         | *(pending commit)* |
-| 2026-09-30 | Boilerplate-reduction refactor: `internal/errs` (error kinds), `internal/web` (`Wrap`, `Bind[T]`, `WriteError`), `db.Model` embedding; `internal/user` migrated to them; conventions recorded in section 3 | *(pending commit)* |
-| 2026-09-30 | Duplicate email now returns 409 (`user.ErrEmailTaken`, `KindConflict`) via GORM `TranslateError: true`; verified against Postgres                                                                          | *(pending commit)* |
+| Date       | Milestone                                                                                                                                                                                                  | Commit    |
+| ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- |
+| 2026-09-07 | Project scaffolded: `cmd/api`, `internal/config`, module init                                                                                                                                              | `6d02497` |
+| 2026-09-07 | Linting (`golangci-lint` v2) + formatting + Taskfile set up                                                                                                                                                | `6d02497` |
+| 2026-09-07 | `.env` support end-to-end (godotenv + caarlos0/env), trimmed to only `APP_ENV` at the time                                                                                                                 | `6d02497` |
+| 2026-09-14 | Gin HTTP server added: `internal/server`, `GET /ping`, `Port` config field added (config-grows-with-consumer applied), `gin.SetMode` driven by `AppEnv`, trusted proxies disabled                          | `ef3195a` |
+| 2026-09-21 | Postgres config fields (`DB_HOST`/`DB_PORT`/`DB_USER`/`DB_PASSWORD`/`DB_NAME`) added to `Config` + `.env.example`                                                                                          | `0e5dc72` |
+| 2026-09-21 | `docker-compose.yml` (local Postgres) + `internal/db` package opening the GORM connection + `GET /health/db` route                                                                                         | `0e5dc72` |
+| 2026-09-21 | `task infra:up`/`infra:down` Taskfile tasks for Docker Compose                                                                                                                                             | `8f73fb6` |
+| 2026-09-29 | `golang-migrate` wired (`task migrate:up`/`down`/`create`), first migration: `users` table (id, name, email, role CHECK-constrained, timestamps)                                                           | `8c61a6a` |
+| 2026-09-29 | `internal/user` domain package (model/repository/service/handler), `POST /users` + `GET /users/:id` wired into `server.go`, create+fetch round-trip verified against real Postgres                         | `5b433b8` |
+| 2026-09-30 | Boilerplate-reduction refactor: `internal/errs` (error kinds), `internal/web` (`Wrap`, `Bind[T]`, `WriteError`), `db.Model` embedding; `internal/user` migrated to them; conventions recorded in section 3 | `5b433b8` |
+| 2026-09-30 | Duplicate email now returns 409 (`user.ErrEmailTaken`, `errs.Conflict`) via GORM `TranslateError: true`; verified against Postgres                                                                         | `5b433b8` |
 
 **Current repo state:**
 ```
