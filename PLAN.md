@@ -52,6 +52,7 @@ Roadmap, open decisions and progress. For how the system works see [docs/design.
 - [ ] Week 3 mentor review
 
 ### Stretch
+- CI pipeline running `task check`, `api:check`, `test` and `test:integration` on every push (all already non-interactive), plus `test:e2e` against a composed stack
 - Lesson progress, completion, certificates (D5) and the metrics they unlock
 - RS256/JWKS; services verifying JWTs themselves; separate DB users per service (A9)
 - Graceful shutdown for all services; refresh-token grace window for parallel clients
@@ -87,7 +88,7 @@ Roadmap, open decisions and progress. For how the system works see [docs/design.
 
 **Done when:** all 10 operations run through Huma, `api/openapi.yaml` is generated and `task api:check` passes, every error response (services and gateway) is problem+json, the 45-check smoke script passes against `task up`, and `task check` is clean.
 
-**Outcome (deviations from the steps above):** no `huma.NewError` override or problem constructors were needed (Huma's `ErrorModel` is already the shared shape, and handlers return domain sentinels); `instance` is omitted because Huma's schema declares it an absolute URI; one Huma API registering both services replaces the merge step (Huma panics on schema-name clashes); domain `Invalid` errors are 422 like Huma's validation errors. Smoke script extended to 52 checks (400 malformed JSON, unknown field, bad UUID, 405, 404, 502 verified by hand).
+**Outcome (deviations from the steps above):** no problem constructors were needed (handlers return domain sentinels and Huma's `ErrorModel` is already the shared shape); `huma.NewError` is overridden (`problem.NewError`, installed by `httpapi.Config`) only to stop echoing submitted values, added after 1.9 in `675cbd1`; `instance` is omitted because Huma's schema declares it an absolute URI; one Huma API registering both services replaces the merge step (Huma panics on schema-name clashes); domain `Invalid` errors are 422 like Huma's validation errors. Smoke script extended to 52 checks (400 malformed JSON, unknown field, bad UUID, 405, 404, 502 verified by hand).
 
 ## 1.10 Test plan
 
@@ -110,7 +111,7 @@ Goal: prove the rules that matter (access control, token security, session rotat
 
 **Done when:** all three layers pass locally, `go test -race ./...` is clean, Taskfile has `test`, `test:integration`, `test:e2e`, and the contract test fails if the spec and the API drift.
 
-**Outcome:** done as planned, with these simplifications: no clock injection was needed (`Tokens.Sign` already takes `now`, so expiry is tested by signing in the past); `restrictToVisible` is tested in-package and via the fake repository's recorded filter; migrations are applied in tests by a small reader of `migrations/<svc>` (SQL executed, Mongo JSON commands run) instead of the golang-migrate library; the e2e layer lives in `test/e2e`, also checks that the gateway serves the committed spec, and skips the Redis/Postgres internals the smoke script inspected via `docker exec` (covered by integration tests). Verified that the validator rejects wrong types, extra fields, the old `{"error"}` shape and undocumented statuses. golangci-lint now lints the tagged files too.
+**Outcome:** done as planned, with these simplifications: no clock injection was needed (`Tokens.Sign` already takes `now`, so expiry is tested by signing in the past); `restrictToVisible` is tested in-package and via the fake repository's recorded filter; migrations are applied in tests by a small reader of `migrations/<svc>` (SQL executed, Mongo JSON commands run) instead of the golang-migrate library; the e2e layer lives in `test/e2e`, also checks that the gateway serves the committed spec, and skips the Redis/Postgres internals the smoke script inspected via `docker exec` (covered by integration tests); the contract validator lives in `test/e2e` rather than `testutil.OpenAPI` (its only user), and gateway tests run against `httptest.NewServer` instead of a `testutil.Do` recorder (Gin's `CloseNotify` panics on a `ResponseRecorder` inside `ReverseProxy`). Verified that the validator rejects wrong types, extra fields, the old `{"error"}` shape and undocumented statuses. golangci-lint now lints the tagged files too.
 
 ## Progress log
 
@@ -129,4 +130,5 @@ Goal: prove the rules that matter (access control, token security, session rotat
 | 2026-10-20         | Decided O1: Huma code-first API + RFC 9457 errors (planned as 1.9; tests move to 1.10)                                          | `b50a9c6`             |
 | 2026-10-20         | 1.9: 10 operations on Huma, generated `api/openapi.yaml` (`task api:gen`/`api:check`), problem+json everywhere, `Invalid` → 422 | `625f603`             |
 | 2026-10-20         | 1.10: unit, integration (testcontainers) and e2e + OpenAPI contract tests; `task test`, `test:integration`, `test:e2e`          | `a380f20`             |
-| 2026-10-20         | Error details no longer echo submitted values (passwords in 422s, raw body in 400s)                                             | *(this commit)*       |
+| 2026-10-20         | Error details no longer echo submitted values (passwords in 422s, raw body in 400s)                                             | `675cbd1`             |
+| 2026-10-20         | Docs brought up to date after 1.9/1.10 (test tooling decisions in design.md, AGENTS gotchas, CI gap noted)                      | *(this commit)*       |

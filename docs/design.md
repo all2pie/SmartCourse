@@ -1,6 +1,6 @@
 # SmartCourse — Technical Design
 
-Status: Week 1 (foundation + core services). This document describes what is built and why; the roadmap lives in [PLAN.md](../PLAN.md), the API contract in [api/openapi.yaml](../api/openapi.yaml).
+Status: Week 1 complete (foundation + core services), pending mentor review. This document describes what is built and why; the roadmap lives in [PLAN.md](../PLAN.md), the API contract in [api/openapi.yaml](../api/openapi.yaml).
 
 ## 1. Goals and scope
 
@@ -120,7 +120,7 @@ sequenceDiagram
     end
 ```
 
-- Rotation is a single Lua script, so two concurrent refreshes of the same token cannot both succeed (verified: 5 parallel requests → exactly one 200).
+- Rotation is a single Lua script, so two concurrent refreshes of the same token cannot both succeed (integration test: 20 parallel rotations against real Redis; e2e: 5 parallel requests through the gateway → exactly one 200).
 - Presenting any non-current token of a family deletes the family pointer, revoking the session for both the attacker and the legitimate client (OAuth 2.0 Security BCP refresh-token reuse detection).
 - Logout deletes the family pointer and is idempotent.
 - Expired tokens disappear via Redis TTLs; there is no cleanup job. Redis runs with AOF persistence so a restart does not log users out.
@@ -182,7 +182,7 @@ Keys are namespaced by owning service (`identity:` today; `gateway:` for rate li
 
 - **Configuration:** environment variables parsed into a per-service struct (`config.Load[T]`); service variables are prefixed (`IDENTITY_DB_NAME`), shared ones are not (`JWT_SECRET`). A root `.env` is loaded for local development only.
 - **Validation:** Huma validates requests against the generated JSON Schema (struct tags such as `minLength`, `format:"email"`, `enum`) and rejects unknown fields; domain rules stay in services. Malformed JSON is a 400; a well-formed request that fails validation is a 422 listing each failing field.
-- **Errors:** every error, from services, Huma validation, the gateway (401, 502) and router fallbacks (404, 405, panics), is an RFC 9457 problem (`application/problem+json`, Huma's `ErrorModel`: `title`, `status`, `detail`, optional `errors[]` with `location`/`message`). `type` is the RFC default `about:blank`. Error details never echo the submitted value (Huma's default `value`), since it may be a password, token or the raw malformed body.
+- **Errors:** every error, from services, Huma validation, the gateway (401, 502) and router fallbacks (404, 405, panics), is an RFC 9457 problem (`application/problem+json`, Huma's `ErrorModel`: `title`, `status`, `detail`, optional `errors[]` with `location`/`message`). `type` is the RFC default `about:blank`. Error details never echo the submitted value (Huma's default `value`), since it may be a password, token or the raw malformed body: `httpapi.Config` installs `problem.NewError` in place of `huma.NewError`.
 - **Pagination:** `limit`/`offset`, default 20, max 100, response `{items,total,limit,offset}` with `items` never `null`.
 - **Secrets in logs:** GORM logs SQL with placeholders only; tokens and password hashes are never logged or serialized.
 - **Health:** every service exposes `/ping`; Identity and Catalog also expose `/health/<dependency>` (`/health/db`, and `/health/redis` on Identity).
@@ -192,7 +192,7 @@ Keys are namespaced by owning service (`identity:` today; `gateway:` for rate li
 ## 8. Local environment and delivery
 
 - `docker-compose.yml` runs Postgres 16, MongoDB 8 (single-node replica set, needed for transactions), Redis 8 (AOF), and, under the `app` profile, the services.
-- One multi-stage `Dockerfile` builds any service (`--build-arg SERVICE=...`) into a static binary on distroless `nonroot` (17–37 MB images). `.env` is never copied into images.
+- One multi-stage `Dockerfile` builds any service (`--build-arg SERVICE=...`) into a static binary on distroless `nonroot` (18–38 MB images). `.env` is never copied into images.
 - **Migrations run as one-shot jobs** (`migrate/migrate`) that must succeed before their service starts, mirroring the production practice of a separate pipeline step rather than migrating on service start. Schema changes should follow expand/contract so old and new versions can run side by side.
 - Only the gateway's port is published; database ports bind to `127.0.0.1` for local tools.
 
@@ -212,8 +212,9 @@ Keys are namespaced by owning service (`identity:` today; `gateway:` for rate li
 | A10 | Sessions             | Short JWT + rotating refresh tokens in Redis                 | Revocable sessions and theft detection; parallel refresh = logout (see §4.2)                                                                                |
 | A11 | Gateway auth         | Secure by default (explicit public allowlist)                | New routes can't be accidentally exposed                                                                                                                    |
 | A12 | Admin bootstrap      | Operator CLI                                                 | No standing admin credentials in config or over HTTP                                                                                                        |
-| O1  | API definition       | Code-first with Huma v2 on Gin; RFC 9457 errors              | One source for routing, validation and docs; rejected swaggest (separate operation list), swaggo (Swagger 2.0), Fuego (pre-1.0), hand-written spec (drifts) |
-
+| O1  | API definition       | Code-first with Huma v2 on Gin; RFC 9457 errors              | One source for routing, validation and docs; rejected swaggest (separate operation list), swaggo (Swagger 2.0), Fuego (pre-1.0), hand-written spec (drifts) || T1  | Test assertions      | Standard library + go-cmp                                    | Idiomatic, readable diffs, no assertion-library lock-in                                                                                                     |
+| T2  | Test databases       | testcontainers-go with the real migrations                   | Self-contained and CI-ready; needs Docker and a few seconds per package                                                                                     |
+| T3  | Contract tests       | kin-openapi validates every e2e response against the spec    | Catches gateway-level drift Huma can't see; only covers responses the e2e flow exercises                                                                    |
 Open domain decisions (publishing, lessons, enrollment rules, search) are tracked in [PLAN.md](../PLAN.md).
 
 ## 10. Known limitations
@@ -222,3 +223,5 @@ Open domain decisions (publishing, lessons, enrollment rules, search) are tracke
 - Logs are Gin's default text format; structured `slog` logs with request IDs and tracing arrive in Week 3.
 - Services do not shut down gracefully yet (in-flight requests are cut on stop).
 - All services share the database admin user locally (A9).
+- No CI yet: every check (`task check`, `api:check`, the three test layers) runs locally only.
+- The `/docs` page loads Swagger UI from the unpkg CDN, so it needs internet access (the spec itself is served locally).
