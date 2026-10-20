@@ -1,9 +1,9 @@
 version: "3"
 
 vars:
-  BINARY: bin/api
-  MIGRATIONS_PATH: db/migrations
-  DATABASE_URL: postgres://{{.DB_USER}}:{{.DB_PASSWORD}}@{{.DB_HOST}}:{{.DB_PORT}}/{{.DB_NAME}}?sslmode=disable
+  # Migrations live in migrations/<SERVICE>; each service's database is named after it.
+  # SERVICE is only appended inside tasks: global vars are rendered before CLI vars exist.
+  PG_URL: postgres://{{.POSTGRES_USER}}:{{.POSTGRES_PASSWORD}}@localhost:{{.POSTGRES_PORT}}
 
 dotenv: [".env"]
 
@@ -19,19 +19,25 @@ tasks:
       - docker compose down
 
   migrate:up:
-    desc: Apply all up migrations
+    desc: 'Apply all up migrations (usage: task migrate:up SERVICE=identity)'
+    requires:
+      vars: [SERVICE]
     cmds:
-      - migrate -path {{.MIGRATIONS_PATH}} -database "{{.DATABASE_URL}}" up
+      - migrate -path migrations/{{.SERVICE}} -database "{{.PG_URL}}/{{.SERVICE}}?sslmode=disable" up
 
   migrate:down:
-    desc: Roll back the last migration
+    desc: 'Roll back the last migration (usage: task migrate:down SERVICE=identity)'
+    requires:
+      vars: [SERVICE]
     cmds:
-      - migrate -path {{.MIGRATIONS_PATH}} -database "{{.DATABASE_URL}}" down 1
+      - migrate -path migrations/{{.SERVICE}} -database "{{.PG_URL}}/{{.SERVICE}}?sslmode=disable" down 1
 
   migrate:create:
-    desc: 'Create a new migration pair (usage: task migrate:create -- add_courses_table)'
+    desc: 'Create a new migration pair (usage: task migrate:create SERVICE=identity -- add_password_hash)'
+    requires:
+      vars: [SERVICE]
     cmds:
-      - migrate create -ext sql -dir {{.MIGRATIONS_PATH}} -seq {{.CLI_ARGS}}
+      - migrate create -ext sql -dir migrations/{{.SERVICE}} -seq {{.CLI_ARGS}}
 
   tidy:
     desc: Tidy go.mod/go.sum
@@ -53,14 +59,16 @@ tasks:
     deps: [fmt, lint]
 
   build:
-    desc: Build the API binary
+    desc: Build every service binary into bin/
     cmds:
-      - go build -o {{.BINARY}} ./cmd/api
+      - go build -o bin/ ./cmd/...
 
   run:
-    desc: Run the API
+    desc: 'Run one service (usage: task run SERVICE=identity)'
+    requires:
+      vars: [SERVICE]
     cmds:
-      - go run ./cmd/api
+      - go run ./cmd/{{.SERVICE}}
 
   test:
     desc: Run tests

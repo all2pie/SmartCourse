@@ -1,4 +1,4 @@
-package user
+package identity
 
 import (
 	"context"
@@ -8,7 +8,7 @@ import (
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 
-	"github.com/all2pie/go-smart-course/internal/errs"
+	"github.com/all2pie/go-smart-course/internal/platform/errs"
 )
 
 var (

@@ -6,8 +6,26 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/all2pie/go-smart-course/internal/errs"
+	"github.com/all2pie/go-smart-course/internal/platform/errs"
 )
+
+// NewRouter returns a Gin engine with the settings every service shares, plus GET /ping.
+func NewRouter(appEnv string) (*gin.Engine, error) {
+	if appEnv == "production" {
+		gin.SetMode(gin.ReleaseMode)
+	}
+
+	router := gin.Default()
+	if err := router.SetTrustedProxies(nil); err != nil {
+		return nil, err
+	}
+
+	router.GET("/ping", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"message": "pong"})
+	})
+
+	return router, nil
+}
 
 // HandlerFunc is a Gin handler that reports failures by returning an error.
 type HandlerFunc func(c *gin.Context) error

@@ -1,11 +1,11 @@
-package user
+package identity
 
 import (
 	"context"
 
 	"github.com/google/uuid"
 
-	"github.com/all2pie/go-smart-course/internal/errs"
+	"github.com/all2pie/go-smart-course/internal/platform/errs"
 )
 
 var ErrInvalidRole = errs.New(errs.Invalid, "invalid role")

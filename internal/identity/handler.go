@@ -1,4 +1,4 @@
-package user
+package identity
 
 import (
 	"net/http"
@@ -6,8 +6,8 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 
-	"github.com/all2pie/go-smart-course/internal/errs"
-	"github.com/all2pie/go-smart-course/internal/web"
+	"github.com/all2pie/go-smart-course/internal/platform/errs"
+	"github.com/all2pie/go-smart-course/internal/platform/web"
 )
 
 type Handler struct {

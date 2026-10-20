@@ -20,7 +20,7 @@ Backend for EduCorp's learning platform: course management + publishing workflow
 
 ## 2. Architecture — microservices (switched 2026-10-20, decisions in progress)
 
-The project started as a modular monolith (one `cmd/api` binary, domain packages under `internal/`). On 2026-10-20 the owner switched to **microservices, with MongoDB in the stack**. The code built so far (`user`, `course`, and the `errs`/`web`/`db` helpers) is the starting point; it gets split into services in Week 1 (section 6).
+The project started as a modular monolith (one `cmd/api` binary, domain packages under `internal/`). On 2026-10-20 the owner switched to **microservices, with MongoDB in the stack**. The monolith was retired in item 1.2: shared helpers moved to `internal/platform`, `internal/user` became the Identity service, and the Postgres course code was deleted (reimplemented on MongoDB in 1.4; the old version is in commit `71333ec` for reference).
 
 **Proposed service map** (coarse-grained; confirm via the open decisions below):
 
@@ -106,28 +106,30 @@ Consequences of database-per-service:
 ## 3. Running conventions (established, keep following these)
 
 - **Config grows with consumers, not ahead of them.** Don't add an env var / config struct field until the code that actually reads it exists in the same change. (Applied so far: `AppEnv` added with the config step itself; `Port` added exactly when Gin needed to bind one.)
-- **`.env.example` is committed, `.env` is gitignored.** Real env vars in prod; `.env` is a local-dev-only convenience (`godotenv.Load()` errors are deliberately ignored — see `internal/config/config.go`).
-- **Task runner is `go-task`** (`Taskfile.yml`), not Make. Standard tasks: `task tidy`, `task fmt`, `task lint`, `task check` (fmt+lint, run before every commit), `task build`, `task run`, `task test`.
+- **`.env.example` is committed, `.env` is gitignored.** Real env vars in prod; `.env` is a local-dev-only convenience (`godotenv.Load()` errors are deliberately ignored — see `internal/platform/config/config.go`).
+- **One root `.env` for all services; service variables carry the service prefix** (`IDENTITY_PORT`, `IDENTITY_DB_NAME`, later `CATALOG_*`, `GATEWAY_*`). Shared ones are unprefixed (`APP_ENV`, `POSTGRES_*` for the compose server and migrations). Each service declares its own `Config` struct in `internal/<service>/config.go` and loads it with `config.Load[<service>.Config]()`; reusable pieces like `postgres.Config` are nested with `envPrefix:"IDENTITY_DB_"`.
+- **Task runner is `go-task`** (`Taskfile.yml`), not Make. Standard tasks: `task tidy`, `task fmt`, `task lint`, `task check` (fmt+lint, run before every commit), `task build` (all services into `bin/`), `task run SERVICE=identity`, `task migrate:up|down|create SERVICE=identity`, `task test`.
+- **Postgres databases per service** are created by `deploy/postgres/init/01-create-databases.sql`, which runs only on an empty volume. Adding a database later means adding it there and recreating the volume (`docker compose down -v`), or creating it by hand.
 - **Linting via `golangci-lint` v2** (`.golangci.yml` — note v2's schema split `linters:` from `formatters:`; don't paste v1-style flat config from older tutorials).
 - **Commit at clean checkpoints** — after a vertical slice works end-to-end and `task check` is clean, not mid-slice.
 - **Module path:** `github.com/all2pie/go-smart-course`. Go version: 1.27.1 (satisfies the PRD's "Go 1.25+").
 
 ### Domain code conventions (every new `internal/<domain>` package MUST follow these)
 
-File layout per domain: `model.go`, `repository.go`, `service.go`, `handler.go` (role-named files, no entity prefix — the package name already says it). `internal/user` is the reference implementation; copy its shape. When a domain package holds a second entity in the same aggregate (e.g. `Module` inside `internal/course`), put it in `<entity>_model.go` / `_repository.go` / `_service.go` / `_handler.go`: the `Repository` interface, `Service` and `Handler` stay single (aggregate-level) and just gain methods, so `server.go` wiring doesn't change.
+File layout per domain: `config.go`, `model.go`, `repository.go`, `service.go`, `handler.go` (role-named files, no entity prefix — the package name already says it). `internal/identity` is the reference implementation; copy its shape. Wiring is explicit in `cmd/<service>/main.go`. When a domain package holds a second entity in the same aggregate (e.g. `Module` inside the catalog), put it in `<entity>_model.go` / `_repository.go` / `_service.go` / `_handler.go`: the `Repository` interface, `Service` and `Handler` stay single (aggregate-level) and just gain methods, so the wiring in `main.go` doesn't change.
 
 1. **Errors: return `errs` sentinels, never write HTTP status codes in domain code.**
    - Declare domain errors as package-level sentinels: `var ErrNotFound = errs.New(errs.NotFound, "course not found")`. Kinds: `errs.NotFound`, `errs.Invalid`, `errs.Conflict`, `errs.Internal`.
-   - Repositories translate ORM errors into these (e.g. `gorm.ErrRecordNotFound` → the domain's `ErrNotFound`; `gorm.ErrDuplicatedKey` → an `errs.Conflict` sentinel like `user.ErrEmailTaken` — `TranslateError: true` is set in `db.Connect`, so never inspect pgx/`23505` directly); unknown errors are wrapped with `fmt.Errorf("doing x: %w", err)` and surface as a generic 500.
+   - Repositories translate ORM errors into these (e.g. `gorm.ErrRecordNotFound` → the domain's `ErrNotFound`; `gorm.ErrDuplicatedKey` → an `errs.Conflict` sentinel like `identity.ErrEmailTaken` — `TranslateError: true` is set in `postgres.Connect`, so never inspect pgx/`23505` directly); unknown errors are wrapped with `fmt.Errorf("doing x: %w", err)` and surface as a generic 500.
    - Services/handlers just `return err` — no per-handler `errors.Is` ladders. New status mapping goes in `web.statusFor` once, not in each domain.
-   - `internal/errs` must stay free of Gin/HTTP imports so workers/Kafka consumers can reuse it.
+   - `internal/platform/errs` must stay free of Gin/HTTP imports so workers/Kafka consumers can reuse it.
 2. **Handlers: `func (h *Handler) x(c *gin.Context) error`, registered via `web.Wrap(h.x)`.** Decode JSON bodies with `web.Bind[reqType](c)` (returns an `errs.Invalid` error on bad input). Success paths write their own `c.JSON(...)` and `return nil`. Keep the per-domain request struct (with `binding` tags) separate from the service's input struct — don't put Gin tags on service types.
-3. **Models embed `db.Model`** (`ID uuid`, `CreatedAt`, `UpdatedAt`) instead of redeclaring those columns; only add domain-specific fields. Schema still comes from a `golang-migrate` SQL migration, never `AutoMigrate`.
+3. **Postgres models embed `postgres.Model`** (`ID uuid`, `CreatedAt`, `UpdatedAt`) instead of redeclaring those columns; only add domain-specific fields. Schema still comes from a `golang-migrate` SQL migration in `migrations/<service>/`, never `AutoMigrate`.
 4. **Partial updates and lists.**
    - `PATCH /<things>/:id` takes an update input of **pointer fields** (nil = leave unchanged, pointer to `""` = clear). The service rejects an all-nil update with an `errs.Invalid` sentinel; the repository applies a `map[string]any` via `Updates` with `clause.Returning{}` and treats `RowsAffected == 0` as not-found. Server-controlled columns (e.g. `status`) are never in the update struct.
    - `GET /<things>` is paginated with `limit`/`offset`. Defaults and the max are applied in the **service** (default 20, max 100); the handler's `binding` tags reject out-of-range values. Responses are `{items, total, limit, offset}` with `items` always a non-nil slice (`[]`, never `null`); order by `created_at DESC, id` for stable pages. Query params are bound with `web.BindQuery[T]`.
    - Gin's query/form binding cannot decode `uuid.UUID`/`*uuid.UUID` by default (it is a `[16]byte`, so Gin takes its array branch and expects 16 repeated values). Opt in to `UnmarshalText` with the tag option: `form:"instructor_id,parser=encoding.TextUnmarshaler"` on a `*uuid.UUID` field (absent param stays `nil`; a malformed value is a binding error → 400). JSON bodies are unaffected.
-5. **Deliberately NOT doing:** a generic `Repository[T]` CRUD base (leaks GORM, forces every entity into one shape), reflection-heavy frameworks, DI containers (explicit constructor wiring in `server.go` is the pattern).
+5. **Deliberately NOT doing:** a generic `Repository[T]` CRUD base (leaks GORM, forces every entity into one shape), reflection-heavy frameworks, DI containers (explicit constructor wiring in `cmd/<service>/main.go` is the pattern).
 
 ## 4. Tech stack — decided vs. deferred
 
@@ -179,24 +181,23 @@ The PRD explicitly wants hand-rolled goroutines/channels/worker-pools/sync primi
 | 2026-10-20 | Phase 3 slice 1: `courses` table migration (instructor_id FK, status draft/ready), `internal/course` (model/repository/service/handler), `POST /courses` + `GET /courses/:id`; FK violation → 400 via `TranslateError`; verified against Postgres                                                                                                         | `2f08052`                                                                              |
 | 2026-10-20 | Phase 3 slice 2: `PATCH /courses/:id` (partial update of title/description, `status` not client-editable) and `GET /courses` (limit/offset pagination, optional `instructor_id` filter, `{items,total,limit,offset}`); `web.BindQuery[T]` added; verified against Postgres, `task check` clean                                                            | `71333ec`                                                                              |
 | 2026-10-20 | Phase 3 slice 3: `modules` table migration (course_id FK ON DELETE CASCADE, `position`, UNIQUE(course_id, position)), `POST /courses/:id/modules` + `GET /courses/:id/modules` (ordered by position); position assigned server-side in a transaction that row-locks the parent course; 20 concurrent creates verified gap-free (1..N); `task check` clean | *(reverted 2026-10-20, never committed: content structure moves to MongoDB in Week 2)* |
+| 2026-10-20 | Week 1 items 1.2 + 1.3: monolith retired; shared code moved to `internal/platform` (`config.Load[T]`, `postgres.Connect`/`Model`, `errs`, `web` + `NewRouter`); Identity service (`cmd/identity`, `internal/identity`, port 8081, database `identity`, `migrations/identity`); compose creates per-service databases; prefixed env vars; Taskfile takes `SERVICE=`. Verified: migrate, ping, health, create 201, duplicate 409, bad role 400, get 200/400/404; `task check` clean | *(this commit)* |
 
 **Current repo state:**
 ```
-cmd/api/main.go            — thin: config.Load() → db.Connect() → server.Run()
-internal/config/config.go  — AppEnv, Port, DBHost/DBPort/DBUser/DBPassword/DBName
-internal/db/db.go          — GORM/Postgres connection (Connect)
-internal/db/model.go       — db.Model (ID/CreatedAt/UpdatedAt) embedded by entities
-internal/errs/             — transport-agnostic error kinds (NotFound/Invalid/Conflict/Internal)
-internal/web/              — Wrap, Bind[T], BindQuery[T], WriteError (kind → HTTP status)
-internal/server/server.go  — Gin engine: GET /ping, GET /health/db, user + course routes
-internal/user/             — model.go, repository.go, service.go, handler.go
-internal/course/           — courses only; same layering as user
-db/migrations/             — 000001_create_users_table, 000002_create_courses_table (up/down)
-docker-compose.yml         — local Postgres (smartcourse-postgres)
+cmd/identity/main.go                — wiring: config.Load → postgres.Connect → web.NewRouter → identity routes
+internal/platform/config/           — Load[T]() (godotenv + caarlos0/env)
+internal/platform/postgres/         — Config (nested via envPrefix), Connect (GORM, TranslateError), Model
+internal/platform/errs/             — transport-agnostic error kinds (NotFound/Invalid/Conflict/Internal)
+internal/platform/web/              — NewRouter (+GET /ping), Wrap, Bind[T], BindQuery[T], WriteError
+internal/identity/                  — config.go, model.go, repository.go, service.go, handler.go (POST /users, GET /users/:id)
+migrations/identity/                — 000001_create_users_table (up/down)
+deploy/postgres/init/               — creates databases identity, enrollment on first start
+docker-compose.yml                  — local Postgres (smartcourse-postgres)
 .golangci.yml, Taskfile.yml, .gitignore, .env.example — all in place
 ```
-Still a single monolith binary. User create/get and course CRUD work against
-Postgres. The microservices split starts in Week 1 (section 6).
+One service (Identity) runs on port 8081 against its own database. No
+course endpoints until Catalog lands (1.4); no gateway until 1.5.
 
 ## 6. Roadmap — organized by the 3-week plan in [Guidelines.md](Guidelines.md)
 
@@ -213,9 +214,9 @@ Each week ends with a mentor review: submit, discuss feedback, refine, then move
 *Guidelines scope: system design and setup; user & course CRUD; role handling (student/instructor). Deliverables: service structure defined, DB schemas created, basic APIs working, local setup ready.*
 
 - [x] **1.1 Finalize the architecture:** A1–A5 decided; service and data-ownership map and access rules approved (section 2).
-- [ ] **1.2 Restructure into services:** move shared code to `internal/platform` (config, db, errs, web); one `cmd/<service>` per service, each with its own config, port and database/migrations.
-- [ ] **1.3 Identity service:** users and roles (port `internal/user`).
-- [ ] **1.4 Catalog service:** course CRUD (port `internal/course`; reimplemented on MongoDB if A2 is MongoDB).
+- [x] **1.2 Restructure into services:** shared code in `internal/platform` (config, postgres, errs, web); one `cmd/<service>` per service, each with its own config, port and database/migrations. Monolith (`cmd/api`, `internal/server`, Postgres course code) retired.
+- [x] **1.3 Identity service:** users and roles (ported from `internal/user`). Credentials and the access rules arrive with auth in 1.6.
+- [ ] **1.4 Catalog service:** course CRUD reimplemented on MongoDB (A2); the retired Postgres version in commit `71333ec` is the behavioural reference.
 - [ ] **1.5 API gateway:** single public port, reverse-proxies `/auth`, `/users` and `/courses` to the services, request-id propagation.
 - [ ] **1.6 Auth + role handling:** register/login with bcrypt, access-token JWT issued by Identity and verified at the gateway, user id and role forwarded as headers. Catalog enforces "only instructors create courses" and "only the owning instructor or an admin edits"; `instructor_id` comes from the token, not the request body.
 - [ ] **1.7 Local setup:** Docker Compose for infra (Postgres, MongoDB) and all services; one command to start everything; per-service `.env.example`.

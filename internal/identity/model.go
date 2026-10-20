@@ -1,6 +1,6 @@
-package user
+package identity
 
-import "github.com/all2pie/go-smart-course/internal/db"
+import "github.com/all2pie/go-smart-course/internal/platform/postgres"
 
 type Role string
 
@@ -20,7 +20,7 @@ func (r Role) Valid() bool {
 }
 
 type User struct {
-	db.Model
+	postgres.Model
 	Name  string `gorm:"not null"                  json:"name"`
 	Email string `gorm:"uniqueIndex;not null"      json:"email"`
 	Role  Role   `gorm:"type:varchar(50);not null" json:"role"`
