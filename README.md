@@ -16,11 +16,11 @@ flowchart LR
     CAT --- MG[("MongoDB: catalog")]
 ```
 
-| Service  | Responsibility                                                       | Storage                              |
-| -------- | -------------------------------------------------------------------- | ------------------------------------ |
-| Gateway  | Single entrypoint: JWT verification, routing, request IDs, API docs   | —                                    |
-| Identity | Users, roles, passwords, login sessions (access + refresh tokens)    | Postgres, Redis                      |
-| Catalog  | Courses, visibility and ownership rules                              | MongoDB                              |
+| Service  | Responsibility                                                      | Storage         |
+| -------- | ------------------------------------------------------------------- | --------------- |
+| Gateway  | Single entrypoint: JWT verification, routing, request IDs, API docs | —               |
+| Identity | Users, roles, passwords, login sessions (access + refresh tokens)   | Postgres, Redis |
+| Catalog  | Courses, visibility and ownership rules                             | MongoDB         |
 
 Enrollment, Analytics and Notification services arrive in Weeks 2–3.
 
@@ -75,32 +75,32 @@ task run SERVICE=identity    # and catalog, gateway in other terminals
 Extra prerequisites: Go 1.27+, golangci-lint v2, and the migrate CLI built with both drivers:
 `go install -tags 'postgres mongodb' github.com/golang-migrate/migrate/v4/cmd/migrate@latest`.
 
-| Task                                          | What it does                                        |
-| --------------------------------------------- | --------------------------------------------------- |
-| `task up` / `task down` / `task logs`         | Whole stack in Docker                               |
-| `task infra:up` / `task infra:down`           | Only Postgres, MongoDB, Redis                       |
-| `task run SERVICE=<name>`                     | Run one service on the host                         |
-| `task build`                                  | Build all binaries into `bin/`                      |
+| Task                                           | What it does                                           |
+| ---------------------------------------------- | ------------------------------------------------------ |
+| `task up` / `task down` / `task logs`          | Whole stack in Docker                                  |
+| `task infra:up` / `task infra:down`            | Only Postgres, MongoDB, Redis                          |
+| `task run SERVICE=<name>`                      | Run one service on the host                            |
+| `task build`                                   | Build all binaries into `bin/`                         |
 | `task migrate:up\|down\|create SERVICE=<name>` | Database migrations (SQL for Postgres, JSON for Mongo) |
-| `task check`                                  | Format + lint (run before every commit)             |
-| `task api:lint`                               | Lint the OpenAPI contract                           |
-| `task test`                                   | Run tests                                           |
-| `task admin:create -- -email ...`             | Create an admin account                             |
+| `task check`                                   | Format + lint (run before every commit)                |
+| `task api:lint`                                | Lint the OpenAPI contract                              |
+| `task test`                                    | Run tests                                              |
+| `task admin:create -- -email ...`              | Create an admin account                                |
 
 ## API overview
 
-| Method | Path              | Auth   | Description                                         |
-| ------ | ----------------- | ------ | --------------------------------------------------- |
-| POST   | `/auth/register`  | public | Register a student or instructor                    |
-| POST   | `/auth/login`     | public | Email + password → access + refresh token           |
-| POST   | `/auth/refresh`   | public | Rotate the refresh token, get a new pair            |
-| POST   | `/auth/logout`    | public | End the session                                     |
-| GET    | `/users/me`       | bearer | Own profile                                         |
-| GET    | `/users/{id}`     | bearer | Profile (email only for self or admin)              |
-| POST   | `/courses`        | bearer | Create a draft course (instructors)                 |
-| GET    | `/courses`        | bearer | List visible courses (paginated)                    |
-| GET    | `/courses/{id}`   | bearer | Get a course                                        |
-| PATCH  | `/courses/{id}`   | bearer | Update title/description (owner or admin)           |
+| Method | Path             | Auth   | Description                               |
+| ------ | ---------------- | ------ | ----------------------------------------- |
+| POST   | `/auth/register` | public | Register a student or instructor          |
+| POST   | `/auth/login`    | public | Email + password → access + refresh token |
+| POST   | `/auth/refresh`  | public | Rotate the refresh token, get a new pair  |
+| POST   | `/auth/logout`   | public | End the session                           |
+| GET    | `/users/me`      | bearer | Own profile                               |
+| GET    | `/users/{id}`    | bearer | Profile (email only for self or admin)    |
+| POST   | `/courses`       | bearer | Create a draft course (instructors)       |
+| GET    | `/courses`       | bearer | List visible courses (paginated)          |
+| GET    | `/courses/{id}`  | bearer | Get a course                              |
+| PATCH  | `/courses/{id}`  | bearer | Update title/description (owner or admin) |
 
 Full request/response schemas: [api/openapi.yaml](api/openapi.yaml).
 

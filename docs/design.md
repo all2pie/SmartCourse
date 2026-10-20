@@ -34,14 +34,14 @@ Solid lines exist today; dotted lines arrive in the week shown.
 
 ### 2.1 Services
 
-| Service      | Owns                                                        | Store                                | Status |
-| ------------ | ----------------------------------------------------------- | ------------------------------------ | ------ |
-| Gateway      | Nothing persistent; routing, authentication, request IDs, docs | —                                 | Built  |
-| Identity     | Users, roles, password hashes, login sessions               | Postgres `identity`, Redis `identity:*` | Built |
-| Catalog      | Courses (later modules, lessons, publishing)                | MongoDB `catalog`                    | Built  |
-| Enrollment   | Enrollments, progress, local course replica                 | Postgres `enrollment`                | Week 2 |
-| Analytics    | Metrics computed from events                                | MongoDB `analytics`                  | Week 3 |
-| Notification | Asynchronous delivery                                       | Redis (Asynq)                        | Week 3 |
+| Service      | Owns                                                           | Store                                   | Status |
+| ------------ | -------------------------------------------------------------- | --------------------------------------- | ------ |
+| Gateway      | Nothing persistent; routing, authentication, request IDs, docs | —                                       | Built  |
+| Identity     | Users, roles, password hashes, login sessions                  | Postgres `identity`, Redis `identity:*` | Built  |
+| Catalog      | Courses (later modules, lessons, publishing)                   | MongoDB `catalog`                       | Built  |
+| Enrollment   | Enrollments, progress, local course replica                    | Postgres `enrollment`                   | Week 2 |
+| Analytics    | Metrics computed from events                                   | MongoDB `analytics`                     | Week 3 |
+| Notification | Asynchronous delivery                                          | Redis (Asynq)                           | Week 3 |
 
 ### 2.2 Service rules
 
@@ -87,10 +87,10 @@ sequenceDiagram
 
 ### 4.1 Tokens
 
-| Token   | Format                                        | Lifetime | Stored                                  |
-| ------- | --------------------------------------------- | -------- | --------------------------------------- |
-| Access  | JWT, HS256, claims `sub`, `role`, `iss`, `iat`, `exp` | 15 min | Nowhere (stateless, verified by the gateway) |
-| Refresh | 130-bit random string (`crypto/rand.Text`)     | 7 days   | Redis, as a SHA-256 hash only           |
+| Token   | Format                                                | Lifetime | Stored                                       |
+| ------- | ----------------------------------------------------- | -------- | -------------------------------------------- |
+| Access  | JWT, HS256, claims `sub`, `role`, `iss`, `iat`, `exp` | 15 min   | Nowhere (stateless, verified by the gateway) |
+| Refresh | 130-bit random string (`crypto/rand.Text`)            | 7 days   | Redis, as a SHA-256 hash only                |
 
 The gateway rejects tokens with the wrong algorithm, signature, issuer, or a missing/past expiry. The HMAC secret (`JWT_SECRET`, ≥ 32 bytes) is held only by Identity and the gateway. Because refresh re-reads the user, role changes take effect within one access-token lifetime.
 
@@ -134,13 +134,13 @@ sequenceDiagram
 
 ## 5. Authorization
 
-| Rule                                        | Where                     |
-| ------------------------------------------- | ------------------------- |
-| Only instructors create courses             | `catalog/service.go`      |
-| Students see published courses; instructors also see their own; admins see all | `catalog/policy.go` |
-| Only the owning instructor or an admin edits a course | `catalog/policy.go` |
-| `email` visible only to the user themselves or an admin | `identity/policy.go` |
-| Self-registration only as student or instructor | `identity/policy.go` |
+| Rule                                                                           | Where                |
+| ------------------------------------------------------------------------------ | -------------------- |
+| Only instructors create courses                                                | `catalog/service.go` |
+| Students see published courses; instructors also see their own; admins see all | `catalog/policy.go`  |
+| Only the owning instructor or an admin edits a course                          | `catalog/policy.go`  |
+| `email` visible only to the user themselves or an admin                        | `identity/policy.go` |
+| Self-registration only as student or instructor                                | `identity/policy.go` |
 
 A resource the caller may not see returns **404** (its existence isn't revealed); one they can see but not change returns **403**. Policies are small pure functions so they are trivially unit-testable.
 
@@ -194,21 +194,21 @@ Keys are namespaced by owning service (`identity:` today; `gateway:` for rate li
 
 ## 9. Decisions and tradeoffs
 
-| #   | Decision | Choice | Why / tradeoff |
-| --- | -------- | ------ | -------------- |
-| A1  | Granularity | 6 coarse services | Clear ownership without nano-services; can split later |
-| A2  | Catalog store | MongoDB, course = one document with embedded modules/lessons | Natural aggregate, atomic reorder; cross-course queries need indexes |
-| A3  | Service protocol | REST via gateway reverse proxy | Simple, debuggable; Protobuf only for Kafka events (W3) |
-| A4  | Repo layout | Monorepo, one module | Shared tooling and atomic refactors; services still deploy independently |
-| A5  | JWT signing | HS256, secret only in Identity + gateway | Simple; RS256/JWKS is the hardening path if more verifiers appear |
-| A6  | Caller identity | Gateway forwards `X-User-*`; services trust it | No token code in services; relies on network isolation (services unpublished) |
-| A7  | Mongo client / IDs | Official driver v2, UUID strings | No ODM magic; consistent IDs across stores at a small size cost |
-| A8  | Mongo migrations | golang-migrate JSON commands | One tool and workflow for all databases; versioned, reviewable |
-| A9  | Per-service DB users | Deferred | Ownership by convention for now; separate roles/users are a stretch goal |
-| A10 | Sessions | Short JWT + rotating refresh tokens in Redis | Revocable sessions and theft detection; parallel refresh = logout (see §4.2) |
-| A11 | Gateway auth | Secure by default (explicit public allowlist) | New routes can't be accidentally exposed |
-| A12 | Admin bootstrap | Operator CLI | No standing admin credentials in config or over HTTP |
-| —   | API docs | Spec-first OpenAPI 3.1 + Swagger UI | No annotation noise or codegen coupling; contract tests (1.9) keep it honest |
+| #   | Decision             | Choice                                                       | Why / tradeoff                                                                |
+| --- | -------------------- | ------------------------------------------------------------ | ----------------------------------------------------------------------------- |
+| A1  | Granularity          | 6 coarse services                                            | Clear ownership without nano-services; can split later                        |
+| A2  | Catalog store        | MongoDB, course = one document with embedded modules/lessons | Natural aggregate, atomic reorder; cross-course queries need indexes          |
+| A3  | Service protocol     | REST via gateway reverse proxy                               | Simple, debuggable; Protobuf only for Kafka events (W3)                       |
+| A4  | Repo layout          | Monorepo, one module                                         | Shared tooling and atomic refactors; services still deploy independently      |
+| A5  | JWT signing          | HS256, secret only in Identity + gateway                     | Simple; RS256/JWKS is the hardening path if more verifiers appear             |
+| A6  | Caller identity      | Gateway forwards `X-User-*`; services trust it               | No token code in services; relies on network isolation (services unpublished) |
+| A7  | Mongo client / IDs   | Official driver v2, UUID strings                             | No ODM magic; consistent IDs across stores at a small size cost               |
+| A8  | Mongo migrations     | golang-migrate JSON commands                                 | One tool and workflow for all databases; versioned, reviewable                |
+| A9  | Per-service DB users | Deferred                                                     | Ownership by convention for now; separate roles/users are a stretch goal      |
+| A10 | Sessions             | Short JWT + rotating refresh tokens in Redis                 | Revocable sessions and theft detection; parallel refresh = logout (see §4.2)  |
+| A11 | Gateway auth         | Secure by default (explicit public allowlist)                | New routes can't be accidentally exposed                                      |
+| A12 | Admin bootstrap      | Operator CLI                                                 | No standing admin credentials in config or over HTTP                          |
+| —   | API docs             | Spec-first OpenAPI 3.1 + Swagger UI                          | No annotation noise or codegen coupling; contract tests (1.9) keep it honest  |
 
 Open domain decisions (publishing, lessons, enrollment rules, search) are tracked in [PLAN.md](../PLAN.md).
 

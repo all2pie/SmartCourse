@@ -2,22 +2,20 @@
 
 Roadmap, open decisions and progress. For how the system works see [docs/design.md](docs/design.md); for conventions and workflow see [AGENTS.md](AGENTS.md). Scope comes from [Requirements.md](Requirements.md); the 3-week delivery structure (mentor review at the end of each week) from [Guidelines.md](Guidelines.md).
 
-**Now:** Week 1, item 1.9 (tests). Next after that: Week 1 mentor review.
+**Now:** decide O1, then Week 1 item 1.9 (tests). Next after that: Week 1 mentor review.
 
 ## Open decisions
 
-| #   | Decision                   | Proposal                                                                                         | Needed by |
-| --- | -------------------------- | ------------------------------------------------------------------------------------------------ | --------- |
-| T1  | Test assertions            | stdlib + `go-cmp` vs `testify`                                                                   | 1.9       |
-| T2  | Integration test infra     | `testcontainers-go` (Postgres, Mongo, Redis) vs reuse `task infra:up` with throwaway databases   | 1.9       |
-| M1  | Unused `refresh_tokens` table | Migration 000003 still creates it (tokens moved to Redis, 000004 deleted). Delete 000003 too (local DB back to v2) or keep | 1.9 |
-| D1  | Editing a published course | Draft revision + republish; students see the last published version                             | Week 2    |
-| D2  | Lesson types               | Video, document, article, external link; no quizzes                                              | Week 2    |
-| D3  | Lesson files               | Uploads to MinIO via presigned URLs                                                              | Week 2    |
-| D4  | Enrollment rules           | Free self-enrollment; optional capacity and prerequisites; drop and re-enroll with history        | Week 2    |
-| D6  | Search                     | MongoDB text index inside Catalog                                                                | Week 2    |
-| W1  | Workers                    | Which jobs use Asynq/Temporal vs a hand-rolled worker pool (the PRD wants concurrency demonstrated) | Week 3 (3.3) |
-| D5  | Completion                 | Student marks lessons complete → enrollment completed → certificate                              | Stretch   |
+| #   | Decision                      | Proposal                                                                                                                   | Needed by    |
+| --- | ----------------------------- | -------------------------------------------------------------------------------------------------------------------------- | ------------ |
+| O1  | OpenAPI source of truth       | Generate the spec from Go DTOs (code-first) instead of hand-writing it; options in chat 2026-10-20. Decide before 1.9 because it shapes handlers and the contract tests | 1.9 |
+| D1  | Editing a published course    | Draft revision + republish; students see the last published version                                                        | Week 2       |
+| D2  | Lesson types                  | Video, document, article, external link; no quizzes                                                                        | Week 2       |
+| D3  | Lesson files                  | Uploads to MinIO via presigned URLs                                                                                        | Week 2       |
+| D4  | Enrollment rules              | Free self-enrollment; optional capacity and prerequisites; drop and re-enroll with history                                 | Week 2       |
+| D6  | Search                        | MongoDB text index inside Catalog                                                                                          | Week 2       |
+| W1  | Workers                       | Which jobs use Asynq/Temporal vs a hand-rolled worker pool (the PRD wants concurrency demonstrated)                        | Week 3 (3.3) |
+| D5  | Completion                    | Student marks lessons complete → enrollment completed → certificate                                                        | Stretch      |
 
 ## Roadmap
 
@@ -63,16 +61,16 @@ Roadmap, open decisions and progress. For how the system works see [docs/design.
 
 Goal: prove the rules that matter (access control, token security, session rotation, validation) at the cheapest layer that can prove them, and keep the OpenAPI contract honest.
 
-| Layer | Scope | Deps | Build tag / task |
-| ----- | ----- | ---- | ---------------- |
-| Unit | `policy.go` (both services); `auth.Tokens` (valid, expired, wrong secret, `alg` none/HS512, wrong issuer, no `exp`, bad `sub`/role, short secret); password/email rules; `web.Actor`, `web.WriteError` status mapping; gateway `RequestID`, `StripIdentityHeaders`, `Authenticate` via `httptest`; Catalog `Service` and Identity `Service`/`AuthService` with in-memory fakes (role checks, 404 vs 403, list filters per role, limit clamping, login/refresh/logout paths) | none | `task test` (`go test -race ./...`) |
-| Integration | Identity Postgres repository (unique email → `ErrEmailTaken`), Catalog Mongo repository (UUID codec round-trip, visibility filter, pagination order), Redis `TokenStore` (rotate, reuse revokes family, TTLs, N concurrent rotations → exactly one wins) | real Postgres/Mongo/Redis (T2) | `-tags integration`, `task test:integration` |
-| End-to-end + contract | Go port of the 45-check smoke script: register → login → courses → refresh/reuse → logout → admin, every response validated against `api/openapi.yaml` (`kin-openapi`) | `task up` | `-tags e2e`, `task test:e2e` |
+| Layer                 | Scope                                                                                                                                                                                                                                                                                                                                                                                                                                                                       | Deps                           | Build tag / task                             |
+| --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------ | -------------------------------------------- |
+| Unit                  | `policy.go` (both services); `auth.Tokens` (valid, expired, wrong secret, `alg` none/HS512, wrong issuer, no `exp`, bad `sub`/role, short secret); password/email rules; `web.Actor`, `web.WriteError` status mapping; gateway `RequestID`, `StripIdentityHeaders`, `Authenticate` via `httptest`; Catalog `Service` and Identity `Service`/`AuthService` with in-memory fakes (role checks, 404 vs 403, list filters per role, limit clamping, login/refresh/logout paths) | none                           | `task test` (`go test -race ./...`)          |
+| Integration           | Identity Postgres repository (unique email → `ErrEmailTaken`), Catalog Mongo repository (UUID codec round-trip, visibility filter, pagination order), Redis `TokenStore` (rotate, reuse revokes family, TTLs, N concurrent rotations → exactly one wins)                                                                                                                                                                                                                    | real Postgres/Mongo/Redis (testcontainers) | `-tags integration`, `task test:integration` |
+| End-to-end + contract | Go port of the 45-check smoke script: register → login → courses → refresh/reuse → logout → admin, every response validated against `api/openapi.yaml` (`kin-openapi`)                                                                                                                                                                                                                                                                                                      | `task up`                      | `-tags e2e`, `task test:e2e`                 |
 
-**Test utilities** (`internal/platform/testutil`, imported only from `_test.go` files):
+**Test utilities** (`internal/platform/testutil`, imported only from `_test.go` files). Decided: assertions with the standard library + `github.com/google/go-cmp` (T1: idiomatic per the Go team's test guidance, readable diffs, `cmpopts` for timestamps/IDs, no assertion-library lock-in); real databases via `testcontainers-go` (T2: self-contained, CI-ready, no dependency on a running stack).
 - `testutil.Actor(role)` / fixed UUIDs; `testutil.Tokens(t)` with a fixed 32-byte secret and a controllable clock.
 - HTTP: `testutil.Do(t, handler, method, path, body, headers)` → recorder; `testutil.JSON[T](t, rec)`.
-- Containers (T2): `testutil.Postgres(t, "identity")`, `testutil.Mongo(t)`, `testutil.Redis(t)`, each applying `migrations/<svc>` and cleaning up with `t.Cleanup`.
+- Containers: `testutil.Postgres(t, "identity")`, `testutil.Mongo(t)`, `testutil.Redis(t)`, each applying `migrations/<svc>` and cleaning up with `t.Cleanup`.
 - Contract: `testutil.OpenAPI(t)` loading `api/openapi.yaml` and validating `*http.Response`s.
 - Fakes stay in each package's `_test.go` files (in-memory `Repository` / `TokenStore`), not shared.
 
@@ -82,14 +80,15 @@ Goal: prove the rules that matter (access control, token security, session rotat
 
 ## Progress log
 
-| Date       | Milestone | Commit |
-| ---------- | --------- | ------ |
+| Date               | Milestone                                                                                                         | Commit                |
+| ------------------ | ----------------------------------------------------------------------------------------------------------------- | --------------------- |
 | 2026-09-07 → 10-20 | Monolith foundation: tooling, Gin, Postgres + GORM + migrations, users and courses CRUD, shared error/web helpers | `6d02497` … `71333ec` |
-| 2026-10-20 | Switched to microservices + MongoDB; architecture and access rules approved (1.1) | `79ac37b` |
-| 2026-10-20 | 1.2 + 1.3: `internal/platform`, Identity service | `e972e47` |
-| 2026-10-20 | 1.4: Catalog on MongoDB with visibility/ownership rules | `38821b7` |
-| 2026-10-20 | 1.5: Gateway reverse proxy, request IDs | `dadd26a` |
-| 2026-10-20 | 1.6: Auth (register/login/refresh/logout, JWT, admin CLI) | `039010b` |
-| 2026-10-20 | Refresh tokens moved to Redis (atomic Lua rotation) | `417ce64` |
-| 2026-10-20 | 1.7: Whole stack in Docker (`task up`) | `a132521` |
-| 2026-10-20 | 1.8: README, design doc, AGENTS.md, OpenAPI 3.1 + Swagger UI at `/docs`; PLAN trimmed; migration 000004 deleted | *(this commit)* |
+| 2026-10-20         | Switched to microservices + MongoDB; architecture and access rules approved (1.1)                                 | `79ac37b`             |
+| 2026-10-20         | 1.2 + 1.3: `internal/platform`, Identity service                                                                  | `e972e47`             |
+| 2026-10-20         | 1.4: Catalog on MongoDB with visibility/ownership rules                                                           | `38821b7`             |
+| 2026-10-20         | 1.5: Gateway reverse proxy, request IDs                                                                           | `dadd26a`             |
+| 2026-10-20         | 1.6: Auth (register/login/refresh/logout, JWT, admin CLI)                                                         | `039010b`             |
+| 2026-10-20         | Refresh tokens moved to Redis (atomic Lua rotation)                                                               | `417ce64`             |
+| 2026-10-20         | 1.7: Whole stack in Docker (`task up`)                                                                            | `a132521`             |
+| 2026-10-20         | 1.8: README, design doc, AGENTS.md, OpenAPI 3.1 + Swagger UI at `/docs`; PLAN trimmed; migration 000004 deleted   | `7902868`             |
+| 2026-10-20         | Migration 000003 deleted (no `refresh_tokens` table; local DB rolled back to v2); test tooling decided (go-cmp, testcontainers) | *(this commit)* |
