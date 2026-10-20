@@ -12,6 +12,9 @@ import (
 	"github.com/all2pie/go-smart-course/internal/platform/errs"
 )
 
+// HeaderRequestID is set by the gateway on every request and echoed in the response.
+const HeaderRequestID = "X-Request-ID"
+
 var errUnauthenticated = errs.New(errs.Unauthenticated, "authentication required")
 
 // Actor returns the caller identified by the gateway-forwarded headers.
