@@ -1,0 +1,6 @@
+extends:
+  - recommended
+rules:
+  # The only server is the local gateway on purpose.
+  no-server-example.com: off
+  # Exceptions to other rules (e.g. /ping has no 4xx) live in .redocly.lint-ignore.yaml.

@@ -27,6 +27,7 @@ func main() {
 	}
 
 	router.Use(gateway.RequestID(), gateway.StripIdentityHeaders())
+	gateway.RegisterDocs(router)
 	gateway.RegisterRoutes(router, *cfg, tokens)
 
 	log.Printf("gateway starting: env=%s port=%d identity=%s catalog=%s",

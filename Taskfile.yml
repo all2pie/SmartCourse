@@ -93,6 +93,11 @@ tasks:
     desc: Format + lint (run before every commit)
     deps: [fmt, lint]
 
+  api:lint:
+    desc: Lint the OpenAPI contract (api/openapi.yaml)
+    cmds:
+      - docker run --rm -v "{{.ROOT_DIR}}/api:/spec:ro" redocly/cli:2.65.1 lint --config /spec/redocly.yaml /spec/openapi.yaml
+
   build:
     desc: Build every service binary into bin/
     cmds:

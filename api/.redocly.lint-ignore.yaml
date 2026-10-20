@@ -1,0 +1,5 @@
+# Deliberate exceptions to Redocly lint rules.
+openapi.yaml:
+  operation-4xx-response:
+    # Liveness has no client-error case.
+    - "#/paths/~1ping/get/responses"

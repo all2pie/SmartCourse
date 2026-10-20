@@ -1,0 +1,92 @@
+# AGENTS.md
+
+Instructions for AI coding agents and contributors working in this repo. Read this first, then [PLAN.md](PLAN.md) (what's next) and [docs/design.md](docs/design.md) (how it works).
+
+## Working agreement
+
+- **Small verified slices.** One roadmap item (or less) at a time. Don't start the next item unprompted.
+- **Interactive.** Before non-trivial design choices, present 2–3 options with tradeoffs and a recommendation, then wait for the owner's pick. Record decisions in [docs/design.md](docs/design.md) §9 (architecture) or [PLAN.md](PLAN.md) (open domain decisions).
+- **Verify, don't assume.** A slice is done when `task check` is clean, it builds, and the behaviour was exercised (tests or real requests against the running stack).
+- **After each slice:** tick the item and add a one-line entry to PLAN.md's progress log, update docs/OpenAPI if behaviour changed, then commit.
+- Edit files with editor tools, not `sed`/`echo` redirection. Running, moving and deleting files via the shell is fine.
+- Ask before destructive or shared-state actions (dropping volumes/data, force pushes, pushing).
+
+## Commands
+
+```bash
+task up | down | logs -- <svc>          # whole stack in Docker (gateway on :8000, docs at /docs)
+task infra:up                           # only Postgres, Mongo, Redis
+task run SERVICE=identity               # run a service on the host
+task migrate:up|down|create SERVICE=identity
+task check                              # format + lint; must be clean before commit
+task api:lint                           # lint api/openapi.yaml
+task test
+task admin:create -- -email a@b.c
+```
+
+`golangci-lint` and `migrate` live in `~/go/bin`; `export PATH="$PATH:$HOME/go/bin"` if not found.
+
+## Layout
+
+```
+cmd/<service>/main.go     explicit wiring only: config → connections → services → router
+internal/<service>/       config.go model.go repository.go service.go handler.go [policy.go]
+internal/platform/        config, postgres, mongodb, redisdb, auth (roles, JWT), errs, web
+api/openapi.yaml          public contract (served by the gateway)
+migrations/<service>/     SQL (Postgres) or JSON (Mongo) for golang-migrate
+```
+
+A second entity in the same aggregate gets `<entity>_model.go`, `_repository.go`, `_service.go`, `_handler.go`; the service's `Handler` gains methods rather than a new type (Identity's `auth_*.go` is the example).
+
+## Code conventions
+
+**Errors**
+- Domain errors are package-level sentinels: `var ErrNotFound = errs.New(errs.NotFound, "course not found")`. Kinds: `NotFound`, `Invalid`, `Conflict`, `Unauthenticated`, `Forbidden`, `Internal`.
+- Repositories translate driver errors (`gorm.ErrRecordNotFound`, `gorm.ErrDuplicatedKey`, `mongo.ErrNoDocuments`) into sentinels; anything else is wrapped `fmt.Errorf("doing x: %w", err)` and becomes a generic 500.
+- Services and handlers just `return err`. HTTP status mapping lives only in `web.statusFor`. `internal/platform/errs` must not import Gin/HTTP.
+
+**Handlers**
+- Signature `func (h *Handler) x(c *gin.Context) error`, registered with `web.Wrap(h.x)`.
+- Bind with `web.Bind[T]` (JSON) / `web.BindQuery[T]` (query). Request structs carry `binding` tags; service input structs never carry Gin tags.
+- Get the caller with `web.Actor(c)` and pass `auth.Actor` to the service.
+- `uuid.UUID` query params need `form:"x,parser=encoding.TextUnmarshaler"`.
+
+**Authorization**
+- Access rules are pure functions in `policy.go`, called by the service.
+- Not visible → 404 (don't reveal existence); visible but not allowed → 403.
+
+**Persistence**
+- Postgres models embed `postgres.Model`; schema comes only from migrations (never `AutoMigrate`).
+- Mongo models use explicit `bson` tags; repositories set `ID` (`uuid.New()`) and timestamps truncated to milliseconds.
+- PATCH inputs use pointer fields (nil = unchanged); reject all-nil updates; server-controlled fields (e.g. `status`) are never client-editable.
+- Lists: `limit`/`offset`, defaults applied in the service (20, max 100), response `{items,total,limit,offset}`, `items` never `null`, order `created_at DESC, id`.
+- Redis keys are prefixed with the owning service (`identity:`); expiry via TTLs.
+
+**Config**
+- Each service has a `Config` struct in `internal/<service>/config.go`, loaded with `config.Load[T]()`.
+- Service vars are prefixed (`CATALOG_MONGO_URI`); shared ones aren't (`APP_ENV`, `JWT_SECRET`). Add a variable only together with the code that reads it, and add it to `.env.example`.
+
+**Style**
+- Explicit constructor wiring; no DI containers, no generic `Repository[T]`.
+- Comments only for what the code can't say, one short line.
+
+## Security rules
+
+- Never log or serialize secrets, tokens or password hashes (`json:"-"`; GORM logs parameterized SQL only).
+- New gateway routes go in the protected group; public routes must be added explicitly to the allowlist in `internal/gateway/proxy.go`.
+- Services must stay unpublished in compose; they trust `X-User-*` only because the gateway strips client copies.
+- `.env` is gitignored and excluded from images; never commit real secrets.
+
+## Migrations
+
+- One directory per service. Create with `task migrate:create SERVICE=<svc> -- <name>` (`.sql` for Postgres services, `.json` for Mongo services listed in the Taskfile's `MONGO_SERVICES`).
+- Once a migration has run anywhere shared (CI, staging, prod), never edit or delete it; add a new one. Local-only history may be cleaned up with the owner's OK (roll the local DB back first).
+- In Docker, `migrate-<svc>` jobs run before their service; in production, migrations are a separate pipeline step, never run at service start.
+
+## Gotchas
+
+- **MongoDB 8 on Linux kernels ≥ 6.19** refuses to start without `GLIBC_TUNABLES=glibc.pthread.rseq=1` (set in compose).
+- **Taskfile:** top-level `vars` render before CLI vars, so `{{.SERVICE}}` only works inside tasks.
+- **golangci-lint "could not import …"** after adding a package means a stale cache: `golangci-lint cache clean`.
+- **Postgres init SQL** (`deploy/postgres/init`) runs only on an empty volume; new databases need `docker compose down -v` or manual creation.
+- **Stopping background binaries:** save the binary's own PID (`(./bin/x & echo $! > /tmp/x.pid)`); killing a wrapping subshell leaves the server running on its port.
