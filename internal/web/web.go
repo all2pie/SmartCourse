@@ -54,3 +54,12 @@ func Bind[T any](c *gin.Context) (T, error) {
 	}
 	return v, nil
 }
+
+// BindQuery decodes and validates URL query parameters into T, returning an errs.Invalid error on failure.
+func BindQuery[T any](c *gin.Context) (T, error) {
+	var v T
+	if err := c.ShouldBindQuery(&v); err != nil {
+		return v, errs.New(errs.Invalid, err.Error())
+	}
+	return v, nil
+}

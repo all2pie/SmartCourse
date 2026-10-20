@@ -48,7 +48,11 @@ File layout per domain: `model.go`, `repository.go`, `service.go`, `handler.go` 
    - `internal/errs` must stay free of Gin/HTTP imports so workers/Kafka consumers can reuse it.
 2. **Handlers: `func (h *Handler) x(c *gin.Context) error`, registered via `web.Wrap(h.x)`.** Decode JSON bodies with `web.Bind[reqType](c)` (returns an `errs.Invalid` error on bad input). Success paths write their own `c.JSON(...)` and `return nil`. Keep the per-domain request struct (with `binding` tags) separate from the service's input struct — don't put Gin tags on service types.
 3. **Models embed `db.Model`** (`ID uuid`, `CreatedAt`, `UpdatedAt`) instead of redeclaring those columns; only add domain-specific fields. Schema still comes from a `golang-migrate` SQL migration, never `AutoMigrate`.
-4. **Deliberately NOT doing:** a generic `Repository[T]` CRUD base (leaks GORM, forces every entity into one shape), reflection-heavy frameworks, DI containers (explicit constructor wiring in `server.go` is the pattern).
+4. **Partial updates and lists.**
+   - `PATCH /<things>/:id` takes an update input of **pointer fields** (nil = leave unchanged, pointer to `""` = clear). The service rejects an all-nil update with an `errs.Invalid` sentinel; the repository applies a `map[string]any` via `Updates` with `clause.Returning{}` and treats `RowsAffected == 0` as not-found. Server-controlled columns (e.g. `status`) are never in the update struct.
+   - `GET /<things>` is paginated with `limit`/`offset`. Defaults and the max are applied in the **service** (default 20, max 100); the handler's `binding` tags reject out-of-range values. Responses are `{items, total, limit, offset}` with `items` always a non-nil slice (`[]`, never `null`); order by `created_at DESC, id` for stable pages. Query params are bound with `web.BindQuery[T]`.
+   - Gin's query/form binding cannot decode `uuid.UUID`/`*uuid.UUID` by default (it is a `[16]byte`, so Gin takes its array branch and expects 16 repeated values). Opt in to `UnmarshalText` with the tag option: `form:"instructor_id,parser=encoding.TextUnmarshaler"` on a `*uuid.UUID` field (absent param stays `nil`; a malformed value is a binding error → 400). JSON bodies are unaffected.
+5. **Deliberately NOT doing:** a generic `Repository[T]` CRUD base (leaks GORM, forces every entity into one shape), reflection-heavy frameworks, DI containers (explicit constructor wiring in `server.go` is the pattern).
 
 ## 4. Tech stack — decided vs. deferred
 
@@ -82,20 +86,21 @@ The PRD explicitly wants hand-rolled goroutines/channels/worker-pools/sync primi
 
 ## 5. Progress log
 
-| Date       | Milestone                                                                                                                                                                                                                                         | Commit    |
-| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- |
-| 2026-09-07 | Project scaffolded: `cmd/api`, `internal/config`, module init                                                                                                                                                                                     | `6d02497` |
-| 2026-09-07 | Linting (`golangci-lint` v2) + formatting + Taskfile set up                                                                                                                                                                                       | `6d02497` |
-| 2026-09-07 | `.env` support end-to-end (godotenv + caarlos0/env), trimmed to only `APP_ENV` at the time                                                                                                                                                        | `6d02497` |
-| 2026-09-14 | Gin HTTP server added: `internal/server`, `GET /ping`, `Port` config field added (config-grows-with-consumer applied), `gin.SetMode` driven by `AppEnv`, trusted proxies disabled                                                                 | `ef3195a` |
-| 2026-09-21 | Postgres config fields (`DB_HOST`/`DB_PORT`/`DB_USER`/`DB_PASSWORD`/`DB_NAME`) added to `Config` + `.env.example`                                                                                                                                 | `0e5dc72` |
-| 2026-09-21 | `docker-compose.yml` (local Postgres) + `internal/db` package opening the GORM connection + `GET /health/db` route                                                                                                                                | `0e5dc72` |
-| 2026-09-21 | `task infra:up`/`infra:down` Taskfile tasks for Docker Compose                                                                                                                                                                                    | `8f73fb6` |
-| 2026-09-29 | `golang-migrate` wired (`task migrate:up`/`down`/`create`), first migration: `users` table (id, name, email, role CHECK-constrained, timestamps)                                                                                                  | `8c61a6a` |
-| 2026-09-29 | `internal/user` domain package (model/repository/service/handler), `POST /users` + `GET /users/:id` wired into `server.go`, create+fetch round-trip verified against real Postgres                                                                | `5b433b8` |
-| 2026-09-30 | Boilerplate-reduction refactor: `internal/errs` (error kinds), `internal/web` (`Wrap`, `Bind[T]`, `WriteError`), `db.Model` embedding; `internal/user` migrated to them; conventions recorded in section 3                                        | `5b433b8` |
-| 2026-09-30 | Duplicate email now returns 409 (`user.ErrEmailTaken`, `errs.Conflict`) via GORM `TranslateError: true`; verified against Postgres                                                                                                                | `5b433b8` |
-| 2026-10-20 | Phase 3 slice 1: `courses` table migration (instructor_id FK, status draft/ready), `internal/course` (model/repository/service/handler), `POST /courses` + `GET /courses/:id`; FK violation → 400 via `TranslateError`; verified against Postgres | `2f08052` |
+| Date       | Milestone                                                                                                                                                                                                                                                                                      | Commit             |
+| ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------ |
+| 2026-09-07 | Project scaffolded: `cmd/api`, `internal/config`, module init                                                                                                                                                                                                                                  | `6d02497`          |
+| 2026-09-07 | Linting (`golangci-lint` v2) + formatting + Taskfile set up                                                                                                                                                                                                                                    | `6d02497`          |
+| 2026-09-07 | `.env` support end-to-end (godotenv + caarlos0/env), trimmed to only `APP_ENV` at the time                                                                                                                                                                                                     | `6d02497`          |
+| 2026-09-14 | Gin HTTP server added: `internal/server`, `GET /ping`, `Port` config field added (config-grows-with-consumer applied), `gin.SetMode` driven by `AppEnv`, trusted proxies disabled                                                                                                              | `ef3195a`          |
+| 2026-09-21 | Postgres config fields (`DB_HOST`/`DB_PORT`/`DB_USER`/`DB_PASSWORD`/`DB_NAME`) added to `Config` + `.env.example`                                                                                                                                                                              | `0e5dc72`          |
+| 2026-09-21 | `docker-compose.yml` (local Postgres) + `internal/db` package opening the GORM connection + `GET /health/db` route                                                                                                                                                                             | `0e5dc72`          |
+| 2026-09-21 | `task infra:up`/`infra:down` Taskfile tasks for Docker Compose                                                                                                                                                                                                                                 | `8f73fb6`          |
+| 2026-09-29 | `golang-migrate` wired (`task migrate:up`/`down`/`create`), first migration: `users` table (id, name, email, role CHECK-constrained, timestamps)                                                                                                                                               | `8c61a6a`          |
+| 2026-09-29 | `internal/user` domain package (model/repository/service/handler), `POST /users` + `GET /users/:id` wired into `server.go`, create+fetch round-trip verified against real Postgres                                                                                                             | `5b433b8`          |
+| 2026-09-30 | Boilerplate-reduction refactor: `internal/errs` (error kinds), `internal/web` (`Wrap`, `Bind[T]`, `WriteError`), `db.Model` embedding; `internal/user` migrated to them; conventions recorded in section 3                                                                                     | `5b433b8`          |
+| 2026-09-30 | Duplicate email now returns 409 (`user.ErrEmailTaken`, `errs.Conflict`) via GORM `TranslateError: true`; verified against Postgres                                                                                                                                                             | `5b433b8`          |
+| 2026-10-20 | Phase 3 slice 1: `courses` table migration (instructor_id FK, status draft/ready), `internal/course` (model/repository/service/handler), `POST /courses` + `GET /courses/:id`; FK violation → 400 via `TranslateError`; verified against Postgres                                              | `2f08052`          |
+| 2026-10-20 | Phase 3 slice 2: `PATCH /courses/:id` (partial update of title/description, `status` not client-editable) and `GET /courses` (limit/offset pagination, optional `instructor_id` filter, `{items,total,limit,offset}`); `web.BindQuery[T]` added; verified against Postgres, `task check` clean | *(pending commit)* |
 
 **Current repo state:**
 ```
@@ -104,7 +109,7 @@ internal/config/config.go  — AppEnv, Port, DBHost/DBPort/DBUser/DBPassword/DBN
 internal/db/db.go          — GORM/Postgres connection (Connect)
 internal/db/model.go       — db.Model (ID/CreatedAt/UpdatedAt) embedded by entities
 internal/errs/             — transport-agnostic error kinds (NotFound/Invalid/Conflict/Internal)
-internal/web/              — Wrap, Bind[T], WriteError (kind → HTTP status)
+internal/web/              — Wrap, Bind[T], BindQuery[T], WriteError (kind → HTTP status)
 internal/server/server.go  — Gin engine: GET /ping, GET /health/db, user + course routes
 internal/user/             — model.go, repository.go, service.go, handler.go
 internal/course/           — same shape as user (courses only; modules/assets not yet)
@@ -113,8 +118,8 @@ docker-compose.yml         — local Postgres (smartcourse-postgres)
 .golangci.yml, Taskfile.yml, .gitignore, .env.example — all in place
 ```
 Database layer (Phase 2) complete: Postgres + GORM + golang-migrate + first
-domain (`internal/user`) proven end-to-end. Phase 3 in progress: `courses` slice
-landed; modules, learning assets, and update/list endpoints still to do. No
+domain (`internal/user`) proven end-to-end. Phase 3 in progress: courses CRUD
+(create/get/update/list) landed; modules and learning assets still to do. No
 enrollment domain yet, no background processing, no observability yet.
 
 ## 6. Roadmap — remaining phases, in intended order
@@ -130,7 +135,7 @@ enrollment domain yet, no background processing, no observability yet.
   - [x] One proven round-trip (create + fetch a user) through a real route
 - [ ] **Phase 3 — Course domain (in progress):** `internal/course` — courses, modules, learning assets; CRUD; still no publishing workflow yet (that's Phase 5)
   - [x] Courses: table + create/get (status `draft`/`ready`; `ready` is only set by the Phase 5 workflow)
-  - [ ] Update + list courses
+  - [x] Update + list courses
   - [ ] Modules
   - [ ] Learning assets
   - Deferred: instructor-role check on course creation (waits for auth; `course` must call `user` via an interface it defines, not query `users` directly)
