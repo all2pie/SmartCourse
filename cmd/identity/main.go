@@ -1,11 +1,9 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
-	"net/http"
-
-	"github.com/gin-gonic/gin"
 
 	"github.com/all2pie/go-smart-course/internal/identity"
 	"github.com/all2pie/go-smart-course/internal/platform/config"
@@ -29,14 +27,13 @@ func main() {
 		log.Fatalf("failed to create router: %v", err)
 	}
 
-	router.GET("/health/db", func(c *gin.Context) {
+	router.GET("/health/db", web.Health(func(ctx context.Context) error {
 		sqlDB, err := db.DB()
-		if err != nil || sqlDB.Ping() != nil {
-			c.JSON(http.StatusServiceUnavailable, gin.H{"status": "down"})
-			return
+		if err != nil {
+			return err
 		}
-		c.JSON(http.StatusOK, gin.H{"status": "up"})
-	})
+		return sqlDB.PingContext(ctx)
+	}))
 
 	identity.NewHandler(identity.NewService(identity.NewRepository(db))).RegisterRoutes(router)
 

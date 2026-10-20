@@ -1,0 +1,6 @@
+[
+  {
+    "dropIndexes": "courses",
+    "index": ["status_created_at", "instructor_id_created_at"]
+  }
+]

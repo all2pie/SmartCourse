@@ -10,6 +10,8 @@ const (
 	NotFound
 	Invalid
 	Conflict
+	Unauthenticated
+	Forbidden
 )
 
 type Error struct {

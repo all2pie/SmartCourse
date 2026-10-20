@@ -4,6 +4,9 @@ vars:
   # Migrations live in migrations/<SERVICE>; each service's database is named after it.
   # SERVICE is only appended inside tasks: global vars are rendered before CLI vars exist.
   PG_URL: postgres://{{.POSTGRES_USER}}:{{.POSTGRES_PASSWORD}}@localhost:{{.POSTGRES_PORT}}
+  MONGO_URL: mongodb://localhost:{{.MONGO_PORT}}
+  # Services whose database is MongoDB (space-separated); every other service uses Postgres.
+  MONGO_SERVICES: catalog
 
 dotenv: [".env"]
 
@@ -11,7 +14,7 @@ tasks:
   infra:up:
     desc: Start local infra via Docker Compose
     cmds:
-      - docker compose up -d
+      - docker compose up -d --wait
 
   infra:down:
     desc: Stop local infra started via Docker Compose
@@ -23,21 +26,32 @@ tasks:
     requires:
       vars: [SERVICE]
     cmds:
-      - migrate -path migrations/{{.SERVICE}} -database "{{.PG_URL}}/{{.SERVICE}}?sslmode=disable" up
+      - task: migrate:run
+        vars: { SERVICE: "{{.SERVICE}}", ARGS: up }
 
   migrate:down:
     desc: 'Roll back the last migration (usage: task migrate:down SERVICE=identity)'
     requires:
       vars: [SERVICE]
     cmds:
-      - migrate -path migrations/{{.SERVICE}} -database "{{.PG_URL}}/{{.SERVICE}}?sslmode=disable" down 1
+      - task: migrate:run
+        vars: { SERVICE: "{{.SERVICE}}", ARGS: down 1 }
 
   migrate:create:
     desc: 'Create a new migration pair (usage: task migrate:create SERVICE=identity -- add_password_hash)'
     requires:
       vars: [SERVICE]
+    vars:
+      EXT: '{{if has .SERVICE (splitList " " .MONGO_SERVICES)}}json{{else}}sql{{end}}'
     cmds:
-      - migrate create -ext sql -dir migrations/{{.SERVICE}} -seq {{.CLI_ARGS}}
+      - migrate create -ext {{.EXT}} -dir migrations/{{.SERVICE}} -seq {{.CLI_ARGS}}
+
+  migrate:run:
+    internal: true
+    vars:
+      DB_URL: '{{if has .SERVICE (splitList " " .MONGO_SERVICES)}}{{.MONGO_URL}}/{{.SERVICE}}?directConnection=true{{else}}{{.PG_URL}}/{{.SERVICE}}?sslmode=disable{{end}}'
+    cmds:
+      - migrate -path migrations/{{.SERVICE}} -database "{{.DB_URL}}" {{.ARGS}}
 
   tidy:
     desc: Tidy go.mod/go.sum

@@ -6,6 +6,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 
+	"github.com/all2pie/go-smart-course/internal/platform/auth"
 	"github.com/all2pie/go-smart-course/internal/platform/errs"
 	"github.com/all2pie/go-smart-course/internal/platform/web"
 )
@@ -24,9 +25,9 @@ func (h *Handler) RegisterRoutes(router gin.IRouter) {
 }
 
 type createUserRequest struct {
-	Name  string `json:"name"  binding:"required"`
-	Email string `json:"email" binding:"required,email"`
-	Role  Role   `json:"role"  binding:"required"`
+	Name  string    `json:"name"  binding:"required"`
+	Email string    `json:"email" binding:"required,email"`
+	Role  auth.Role `json:"role"  binding:"required"`
 }
 
 func (h *Handler) create(c *gin.Context) error {

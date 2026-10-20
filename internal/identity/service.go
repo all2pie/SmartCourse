@@ -5,6 +5,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/all2pie/go-smart-course/internal/platform/auth"
 	"github.com/all2pie/go-smart-course/internal/platform/errs"
 )
 
@@ -21,7 +22,7 @@ func NewService(repo Repository) *Service {
 type CreateInput struct {
 	Name  string
 	Email string
-	Role  Role
+	Role  auth.Role
 }
 
 func (s *Service) Create(ctx context.Context, in CreateInput) (*User, error) {
