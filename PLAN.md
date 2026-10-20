@@ -37,66 +37,95 @@ Explicitly chosen over a true microservices split (evaluated both, owner picked 
 - **Commit at clean checkpoints** — after a vertical slice works end-to-end and `task check` is clean, not mid-slice.
 - **Module path:** `github.com/all2pie/go-smart-course`. Go version: 1.27.1 (satisfies the PRD's "Go 1.25+").
 
+### Domain code conventions (every new `internal/<domain>` package MUST follow these)
+
+File layout per domain: `model.go`, `repository.go`, `service.go`, `handler.go` (role-named files, no entity prefix — the package name already says it). `internal/user` is the reference implementation; copy its shape.
+
+1. **Errors: return `errs` sentinels, never write HTTP status codes in domain code.**
+   - Declare domain errors as package-level sentinels: `var ErrNotFound = errs.New(errs.NotFound, "course not found")`. Kinds: `errs.NotFound`, `errs.Invalid`, `errs.Conflict`, `errs.Internal`.
+   - Repositories translate ORM errors into these (e.g. `gorm.ErrRecordNotFound` → the domain's `ErrNotFound`; `gorm.ErrDuplicatedKey` → a `KindConflict` sentinel like `user.ErrEmailTaken` — `TranslateError: true` is set in `db.Connect`, so never inspect pgx/`23505` directly); unknown errors are wrapped with `fmt.Errorf("doing x: %w", err)` and surface as a generic 500.
+   - Services/handlers just `return err` — no per-handler `errors.Is` ladders. New status mapping goes in `web.statusFor` once, not in each domain.
+   - `internal/errs` must stay free of Gin/HTTP imports so workers/Kafka consumers can reuse it.
+2. **Handlers: `func (h *Handler) x(c *gin.Context) error`, registered via `web.Wrap(h.x)`.** Decode JSON bodies with `web.Bind[reqType](c)` (returns an `errs.Invalid` error on bad input). Success paths write their own `c.JSON(...)` and `return nil`. Keep the per-domain request struct (with `binding` tags) separate from the service's input struct — don't put Gin tags on service types.
+3. **Models embed `db.Model`** (`ID uuid`, `CreatedAt`, `UpdatedAt`) instead of redeclaring those columns; only add domain-specific fields. Schema still comes from a `golang-migrate` SQL migration, never `AutoMigrate`.
+4. **Deliberately NOT doing:** a generic `Repository[T]` CRUD base (leaks GORM, forces every entity into one shape), reflection-heavy frameworks, DI containers (explicit constructor wiring in `server.go` is the pattern).
+
 ## 4. Tech stack — decided vs. deferred
 
 ### Decided / in use
-| Concern | Choice | Why (brief — full reasoning was given in chat, ask owner if it needs restating) |
-|---|---|---|
-| HTTP framework | Gin | Given in original PRD wishlist |
-| .env loading | `joho/godotenv` | Minimal, single-purpose |
-| Env → struct config | `caarlos0/env/v11` | Zero-dep, struct-tag based, pairs with godotenv |
-| Linting | `golangci-lint` v2 | Aggregates `govet`, `staticcheck`, `errcheck`, `unused`, `ineffassign` (via `default: standard`) + `misspell`, `unconvert`, `unparam` |
-| Formatting | `gofmt` + `goimports` (via `golangci-lint fmt`) | Standard Go formatting + import grouping |
-| Task runner | `go-task` (Taskfile) | Chosen over Make/plain scripts by owner |
+| Concern             | Choice                                          | Why (brief — full reasoning was given in chat, ask owner if it needs restating)                                                       |
+| ------------------- | ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| HTTP framework      | Gin                                             | Given in original PRD wishlist                                                                                                        |
+| .env loading        | `joho/godotenv`                                 | Minimal, single-purpose                                                                                                               |
+| Env → struct config | `caarlos0/env/v11`                              | Zero-dep, struct-tag based, pairs with godotenv                                                                                       |
+| Linting             | `golangci-lint` v2                              | Aggregates `govet`, `staticcheck`, `errcheck`, `unused`, `ineffassign` (via `default: standard`) + `misspell`, `unconvert`, `unparam` |
+| Formatting          | `gofmt` + `goimports` (via `golangci-lint fmt`) | Standard Go formatting + import grouping                                                                                              |
+| Task runner         | `go-task` (Taskfile)                            | Chosen over Make/plain scripts by owner                                                                                               |
 
 ### Decided in principle, not yet implemented
-| Concern | Choice | Notes |
-|---|---|---|
-| Relational DB | PostgreSQL + GORM | Users/courses/enrollment — relational, transactional |
-| Document DB | MongoDB | Deferred until something genuinely unstructured needs it (content blocks, raw analytics events) — not day one |
-| Cache/queues backing | Redis | Not yet wired |
-| Event streaming | Kafka + Confluent Schema Registry | Not yet wired |
-| Durable workflows | Temporal (Go SDK) | For the multi-step course-publish and enrollment sagas specifically |
-| Background jobs | Asynq (Redis-based) | For simple fire-and-forget jobs (notifications, analytics bumps) — **not** RabbitMQ+native workers, redundant given Redis is already in-stack |
-| Kafka client | `twmb/franz-go` | Pure Go, no CGO, chosen over `confluent-kafka-go` (CGO/librdkafka) and `segmentio/kafka-go` (less actively maintained) |
-| Logging | stdlib `log/slog` | Not yet wired |
-| Observability | OpenTelemetry + Prometheus/Grafana + Jaeger | Not yet wired |
-| Validation | `go-playground/validator` | Not yet wired |
-| Migrations | `golang-migrate/migrate` | Not yet wired — do NOT rely on GORM `AutoMigrate` beyond prototyping |
+| Concern              | Choice                                      | Notes                                                                                                                                         |
+| -------------------- | ------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| Relational DB        | PostgreSQL + GORM                           | Users/courses/enrollment — relational, transactional                                                                                          |
+| Document DB          | MongoDB                                     | Deferred until something genuinely unstructured needs it (content blocks, raw analytics events) — not day one                                 |
+| Cache/queues backing | Redis                                       | Not yet wired                                                                                                                                 |
+| Event streaming      | Kafka + Confluent Schema Registry           | Not yet wired                                                                                                                                 |
+| Durable workflows    | Temporal (Go SDK)                           | For the multi-step course-publish and enrollment sagas specifically                                                                           |
+| Background jobs      | Asynq (Redis-based)                         | For simple fire-and-forget jobs (notifications, analytics bumps) — **not** RabbitMQ+native workers, redundant given Redis is already in-stack |
+| Kafka client         | `twmb/franz-go`                             | Pure Go, no CGO, chosen over `confluent-kafka-go` (CGO/librdkafka) and `segmentio/kafka-go` (less actively maintained)                        |
+| Logging              | stdlib `log/slog`                           | Not yet wired                                                                                                                                 |
+| Observability        | OpenTelemetry + Prometheus/Grafana + Jaeger | Not yet wired                                                                                                                                 |
+| Validation           | `go-playground/validator`                   | Not yet wired                                                                                                                                 |
+| Migrations           | `golang-migrate/migrate`                    | Not yet wired — do NOT rely on GORM `AutoMigrate` beyond prototyping                                                                          |
 
 ### Open architectural question — flagged, not resolved
 The PRD explicitly wants hand-rolled goroutines/channels/worker-pools/sync primitives *demonstrated*, but Asynq/Temporal would otherwise implement that for you. **Decision needed before background processing work starts:** which specific workloads get a hand-rolled worker pool (learning exercise) vs. which lean on Asynq/Temporal (reliability, no reinvention). Suggested split floated in chat: Temporal for the stateful multi-step workflows (publish, enrollment saga), hand-rolled worker pools for simpler high-volume jobs (e.g. notification dispatch) where the concurrency patterns are the point. **Not yet decided — revisit when reaching section 6's background-processing phase.**
 
 ## 5. Progress log
 
-| Date | Milestone | Commit |
-|---|---|---|
-| 2026-09-07 | Project scaffolded: `cmd/api`, `internal/config`, module init | `6d02497` |
-| 2026-09-07 | Linting (`golangci-lint` v2) + formatting + Taskfile set up | `6d02497` |
-| 2026-09-07 | `.env` support end-to-end (godotenv + caarlos0/env), trimmed to only `APP_ENV` at the time | `6d02497` |
-| 2026-09-14 | Gin HTTP server added: `internal/server`, `GET /ping`, `Port` config field added (config-grows-with-consumer applied), `gin.SetMode` driven by `AppEnv`, trusted proxies disabled | `ef3195a` |
+| Date       | Milestone                                                                                                                                                                                                  | Commit             |
+| ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------ |
+| 2026-09-07 | Project scaffolded: `cmd/api`, `internal/config`, module init                                                                                                                                              | `6d02497`          |
+| 2026-09-07 | Linting (`golangci-lint` v2) + formatting + Taskfile set up                                                                                                                                                | `6d02497`          |
+| 2026-09-07 | `.env` support end-to-end (godotenv + caarlos0/env), trimmed to only `APP_ENV` at the time                                                                                                                 | `6d02497`          |
+| 2026-09-14 | Gin HTTP server added: `internal/server`, `GET /ping`, `Port` config field added (config-grows-with-consumer applied), `gin.SetMode` driven by `AppEnv`, trusted proxies disabled                          | `ef3195a`          |
+| 2026-09-21 | Postgres config fields (`DB_HOST`/`DB_PORT`/`DB_USER`/`DB_PASSWORD`/`DB_NAME`) added to `Config` + `.env.example`                                                                                          | `0e5dc72`          |
+| 2026-09-21 | `docker-compose.yml` (local Postgres) + `internal/db` package opening the GORM connection + `GET /health/db` route                                                                                         | `0e5dc72`          |
+| 2026-09-21 | `task infra:up`/`infra:down` Taskfile tasks for Docker Compose                                                                                                                                             | `8f73fb6`          |
+| 2026-09-29 | `golang-migrate` wired (`task migrate:up`/`down`/`create`), first migration: `users` table (id, name, email, role CHECK-constrained, timestamps)                                                           | `8c61a6a`          |
+| 2026-09-29 | `internal/user` domain package (model/repository/service/handler), `POST /users` + `GET /users/:id` wired into `server.go`, create+fetch round-trip verified against real Postgres                         | *(pending commit)* |
+| 2026-09-30 | Boilerplate-reduction refactor: `internal/errs` (error kinds), `internal/web` (`Wrap`, `Bind[T]`, `WriteError`), `db.Model` embedding; `internal/user` migrated to them; conventions recorded in section 3 | *(pending commit)* |
+| 2026-09-30 | Duplicate email now returns 409 (`user.ErrEmailTaken`, `KindConflict`) via GORM `TranslateError: true`; verified against Postgres                                                                          | *(pending commit)* |
 
 **Current repo state:**
 ```
-cmd/api/main.go          — thin: config.Load() → server.Run()
-internal/config/config.go — AppEnv, Port
-internal/server/server.go — Gin engine, GET /ping only
+cmd/api/main.go            — thin: config.Load() → db.Connect() → server.Run()
+internal/config/config.go  — AppEnv, Port, DBHost/DBPort/DBUser/DBPassword/DBName
+internal/db/db.go          — GORM/Postgres connection (Connect)
+internal/db/model.go       — db.Model (ID/CreatedAt/UpdatedAt) embedded by entities
+internal/errs/             — transport-agnostic error kinds (NotFound/Invalid/Conflict/Internal)
+internal/web/              — Wrap, Bind[T], WriteError (kind → HTTP status)
+internal/server/server.go  — Gin engine: GET /ping, GET /health/db, user routes
+internal/user/             — model.go, repository.go, service.go, handler.go
+db/migrations/             — 000001_create_users_table (up/down)
+docker-compose.yml         — local Postgres (smartcourse-postgres)
 .golangci.yml, Taskfile.yml, .gitignore, .env.example — all in place
 ```
-No database, no other domain packages, no background processing, no observability yet.
+Database layer (Phase 2) complete: Postgres + GORM + golang-migrate + first
+domain (`internal/user`) proven end-to-end. No course/enrollment domains yet,
+no background processing, no observability yet.
 
 ## 6. Roadmap — remaining phases, in intended order
 
 - [x] **Phase 0 — Tooling bootstrap:** lint, format, Taskfile, `.env`/config
 - [x] **Phase 1 — HTTP server:** Gin, one health route
-- [ ] **Phase 2 — Database layer (next up):**
-  - [ ] Postgres connection config (`DB_HOST`/`DB_PORT`/`DB_USER`/`DB_PASSWORD`/`DB_NAME`) added to `Config`
-  - [ ] `docker-compose.yml` with local Postgres (first Docker Compose file in the project)
-  - [ ] `internal/db` (or similar) package: opens/exposes the GORM connection
-  - [ ] First domain: `internal/user` (id, email, role, timestamps) — chosen first because course/enrollment both depend on users existing
-  - [ ] `golang-migrate` wired, one migration for the users table
-  - [ ] One proven round-trip (create + fetch a user) through a real route
-- [ ] **Phase 3 — Course domain:** `internal/course` — courses, modules, learning assets; CRUD; still no publishing workflow yet (that's Phase 5)
+- [x] **Phase 2 — Database layer:**
+  - [x] Postgres connection config (`DB_HOST`/`DB_PORT`/`DB_USER`/`DB_PASSWORD`/`DB_NAME`) added to `Config`
+  - [x] `docker-compose.yml` with local Postgres (first Docker Compose file in the project)
+  - [x] `internal/db` (or similar) package: opens/exposes the GORM connection
+  - [x] First domain: `internal/user` (id, name, email, role, timestamps) — chosen first because course/enrollment both depend on users existing
+  - [x] `golang-migrate` wired, one migration for the users table
+  - [x] One proven round-trip (create + fetch a user) through a real route
+- [ ] **Phase 3 — Course domain (next up):** `internal/course` — courses, modules, learning assets; CRUD; still no publishing workflow yet (that's Phase 5)
 - [ ] **Phase 4 — Enrollment domain:** `internal/enrollment` — enroll/duplicate rules/history; still synchronous only (no async side effects yet — that's Phase 6)
 - [ ] **Phase 5 — Content publishing workflow (concurrency showcase #1):** validation, asset verification, search-index update, cache refresh, analytics init — run concurrently where dependencies allow; goroutines + WaitGroups + channels + context propagation; "Ready" state only after all steps succeed; partial-failure handling
 - [ ] **Phase 6 — Enrollment workflow + background processing:** progress init, analytics update, notifications; resolve the Asynq/Temporal-vs-hand-rolled-pool question from section 4 before starting; worker pool implementation (fixed size, job queue, graceful shutdown, retries, backpressure)

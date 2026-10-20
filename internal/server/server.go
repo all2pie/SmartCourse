@@ -7,6 +7,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/all2pie/go-smart-course/internal/config"
+	"github.com/all2pie/go-smart-course/internal/user"
 )
 
 func Run(cfg *config.Config, db *gorm.DB) error {
@@ -18,6 +19,9 @@ func Run(cfg *config.Config, db *gorm.DB) error {
 	if err := router.SetTrustedProxies(nil); err != nil {
 		return err
 	}
+
+	userHandler := user.NewHandler(user.NewService(user.NewRepository(db)))
+	userHandler.RegisterRoutes(router)
 
 	router.GET("/ping", func(c *gin.Context) {
 		c.JSON(200, gin.H{"message": "pong"})
