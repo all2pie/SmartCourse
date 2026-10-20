@@ -14,7 +14,7 @@
 
 Backend for EduCorp's learning platform: course management + publishing workflow, student enrollment, analytics, background/event-driven processing, built to demonstrate Go concurrency (goroutines, channels, worker pools, sync primitives, context propagation) and production-grade observability/reliability patterns.
 
-Full original PRD (business goals, functional requirements, analytics metrics, tech stack wishlist) was provided by the owner at project kickoff — not reproduced here in full; ask the owner if the source PRD text is needed verbatim.
+**Source requirements:** the full original PRD lives in [Requirements.md](Requirements.md) (business goals, functional requirements 1–7, analytics metrics, concurrency expectations, tech stack). It is the source of truth for *what* to build; this file is the source of truth for *how/in what order/where we are*. Read the relevant Requirements.md section before starting any phase, and if the two ever conflict on scope, ask the owner.
 
 ## 2. Architecture decision: Path A — Modular Monolith
 
@@ -82,19 +82,20 @@ The PRD explicitly wants hand-rolled goroutines/channels/worker-pools/sync primi
 
 ## 5. Progress log
 
-| Date       | Milestone                                                                                                                                                                                                  | Commit    |
-| ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- |
-| 2026-09-07 | Project scaffolded: `cmd/api`, `internal/config`, module init                                                                                                                                              | `6d02497` |
-| 2026-09-07 | Linting (`golangci-lint` v2) + formatting + Taskfile set up                                                                                                                                                | `6d02497` |
-| 2026-09-07 | `.env` support end-to-end (godotenv + caarlos0/env), trimmed to only `APP_ENV` at the time                                                                                                                 | `6d02497` |
-| 2026-09-14 | Gin HTTP server added: `internal/server`, `GET /ping`, `Port` config field added (config-grows-with-consumer applied), `gin.SetMode` driven by `AppEnv`, trusted proxies disabled                          | `ef3195a` |
-| 2026-09-21 | Postgres config fields (`DB_HOST`/`DB_PORT`/`DB_USER`/`DB_PASSWORD`/`DB_NAME`) added to `Config` + `.env.example`                                                                                          | `0e5dc72` |
-| 2026-09-21 | `docker-compose.yml` (local Postgres) + `internal/db` package opening the GORM connection + `GET /health/db` route                                                                                         | `0e5dc72` |
-| 2026-09-21 | `task infra:up`/`infra:down` Taskfile tasks for Docker Compose                                                                                                                                             | `8f73fb6` |
-| 2026-09-29 | `golang-migrate` wired (`task migrate:up`/`down`/`create`), first migration: `users` table (id, name, email, role CHECK-constrained, timestamps)                                                           | `8c61a6a` |
-| 2026-09-29 | `internal/user` domain package (model/repository/service/handler), `POST /users` + `GET /users/:id` wired into `server.go`, create+fetch round-trip verified against real Postgres                         | `5b433b8` |
-| 2026-09-30 | Boilerplate-reduction refactor: `internal/errs` (error kinds), `internal/web` (`Wrap`, `Bind[T]`, `WriteError`), `db.Model` embedding; `internal/user` migrated to them; conventions recorded in section 3 | `5b433b8` |
-| 2026-09-30 | Duplicate email now returns 409 (`user.ErrEmailTaken`, `errs.Conflict`) via GORM `TranslateError: true`; verified against Postgres                                                                         | `5b433b8` |
+| Date       | Milestone                                                                                                                                                                                                                                         | Commit             |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------ |
+| 2026-09-07 | Project scaffolded: `cmd/api`, `internal/config`, module init                                                                                                                                                                                     | `6d02497`          |
+| 2026-09-07 | Linting (`golangci-lint` v2) + formatting + Taskfile set up                                                                                                                                                                                       | `6d02497`          |
+| 2026-09-07 | `.env` support end-to-end (godotenv + caarlos0/env), trimmed to only `APP_ENV` at the time                                                                                                                                                        | `6d02497`          |
+| 2026-09-14 | Gin HTTP server added: `internal/server`, `GET /ping`, `Port` config field added (config-grows-with-consumer applied), `gin.SetMode` driven by `AppEnv`, trusted proxies disabled                                                                 | `ef3195a`          |
+| 2026-09-21 | Postgres config fields (`DB_HOST`/`DB_PORT`/`DB_USER`/`DB_PASSWORD`/`DB_NAME`) added to `Config` + `.env.example`                                                                                                                                 | `0e5dc72`          |
+| 2026-09-21 | `docker-compose.yml` (local Postgres) + `internal/db` package opening the GORM connection + `GET /health/db` route                                                                                                                                | `0e5dc72`          |
+| 2026-09-21 | `task infra:up`/`infra:down` Taskfile tasks for Docker Compose                                                                                                                                                                                    | `8f73fb6`          |
+| 2026-09-29 | `golang-migrate` wired (`task migrate:up`/`down`/`create`), first migration: `users` table (id, name, email, role CHECK-constrained, timestamps)                                                                                                  | `8c61a6a`          |
+| 2026-09-29 | `internal/user` domain package (model/repository/service/handler), `POST /users` + `GET /users/:id` wired into `server.go`, create+fetch round-trip verified against real Postgres                                                                | `5b433b8`          |
+| 2026-09-30 | Boilerplate-reduction refactor: `internal/errs` (error kinds), `internal/web` (`Wrap`, `Bind[T]`, `WriteError`), `db.Model` embedding; `internal/user` migrated to them; conventions recorded in section 3                                        | `5b433b8`          |
+| 2026-09-30 | Duplicate email now returns 409 (`user.ErrEmailTaken`, `errs.Conflict`) via GORM `TranslateError: true`; verified against Postgres                                                                                                                | `5b433b8`          |
+| 2026-10-20 | Phase 3 slice 1: `courses` table migration (instructor_id FK, status draft/ready), `internal/course` (model/repository/service/handler), `POST /courses` + `GET /courses/:id`; FK violation → 400 via `TranslateError`; verified against Postgres | `c50f084` |
 
 **Current repo state:**
 ```
@@ -104,15 +105,17 @@ internal/db/db.go          — GORM/Postgres connection (Connect)
 internal/db/model.go       — db.Model (ID/CreatedAt/UpdatedAt) embedded by entities
 internal/errs/             — transport-agnostic error kinds (NotFound/Invalid/Conflict/Internal)
 internal/web/              — Wrap, Bind[T], WriteError (kind → HTTP status)
-internal/server/server.go  — Gin engine: GET /ping, GET /health/db, user routes
+internal/server/server.go  — Gin engine: GET /ping, GET /health/db, user + course routes
 internal/user/             — model.go, repository.go, service.go, handler.go
-db/migrations/             — 000001_create_users_table (up/down)
+internal/course/           — same shape as user (courses only; modules/assets not yet)
+db/migrations/             — 000001_create_users_table, 000002_create_courses_table (up/down)
 docker-compose.yml         — local Postgres (smartcourse-postgres)
 .golangci.yml, Taskfile.yml, .gitignore, .env.example — all in place
 ```
 Database layer (Phase 2) complete: Postgres + GORM + golang-migrate + first
-domain (`internal/user`) proven end-to-end. No course/enrollment domains yet,
-no background processing, no observability yet.
+domain (`internal/user`) proven end-to-end. Phase 3 in progress: `courses` slice
+landed; modules, learning assets, and update/list endpoints still to do. No
+enrollment domain yet, no background processing, no observability yet.
 
 ## 6. Roadmap — remaining phases, in intended order
 
@@ -125,7 +128,12 @@ no background processing, no observability yet.
   - [x] First domain: `internal/user` (id, name, email, role, timestamps) — chosen first because course/enrollment both depend on users existing
   - [x] `golang-migrate` wired, one migration for the users table
   - [x] One proven round-trip (create + fetch a user) through a real route
-- [ ] **Phase 3 — Course domain (next up):** `internal/course` — courses, modules, learning assets; CRUD; still no publishing workflow yet (that's Phase 5)
+- [ ] **Phase 3 — Course domain (in progress):** `internal/course` — courses, modules, learning assets; CRUD; still no publishing workflow yet (that's Phase 5)
+  - [x] Courses: table + create/get (status `draft`/`ready`; `ready` is only set by the Phase 5 workflow)
+  - [ ] Update + list courses
+  - [ ] Modules
+  - [ ] Learning assets
+  - Deferred: instructor-role check on course creation (waits for auth; `course` must call `user` via an interface it defines, not query `users` directly)
 - [ ] **Phase 4 — Enrollment domain:** `internal/enrollment` — enroll/duplicate rules/history; still synchronous only (no async side effects yet — that's Phase 6)
 - [ ] **Phase 5 — Content publishing workflow (concurrency showcase #1):** validation, asset verification, search-index update, cache refresh, analytics init — run concurrently where dependencies allow; goroutines + WaitGroups + channels + context propagation; "Ready" state only after all steps succeed; partial-failure handling
 - [ ] **Phase 6 — Enrollment workflow + background processing:** progress init, analytics update, notifications; resolve the Asynq/Temporal-vs-hand-rolled-pool question from section 4 before starting; worker pool implementation (fixed size, job queue, graceful shutdown, retries, backpressure)
@@ -141,7 +149,7 @@ no background processing, no observability yet.
 
 ## 7. How to resume this project in a fresh session
 
-1. Read this file in full first.
+1. Read this file in full first, then skim [Requirements.md](Requirements.md) (the PRD) for the section matching the next roadmap item.
 2. Run `git log --oneline` and `find . -type f` (excluding `.git`) to confirm reality matches section 5's stated state — **the code is the source of truth if this file and the code ever disagree.**
 3. Check the roadmap in section 6 for the next unchecked item — that's the next slice, not the whole remaining phase at once.
 4. Re-read section "How the owner wants to work" at the top before doing anything.

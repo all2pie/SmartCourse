@@ -35,11 +35,7 @@ func (h *Handler) create(c *gin.Context) error {
 		return err
 	}
 
-	u, err := h.service.Create(c.Request.Context(), CreateInput{
-		Name:  req.Name,
-		Email: req.Email,
-		Role:  req.Role,
-	})
+	u, err := h.service.Create(c.Request.Context(), CreateInput(req))
 	if err != nil {
 		return err
 	}
