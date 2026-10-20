@@ -11,4 +11,5 @@ CREATE TABLE refresh_tokens (
 );
 
 CREATE INDEX refresh_tokens_family_id_idx ON refresh_tokens (family_id);
+
 CREATE INDEX refresh_tokens_user_id_idx ON refresh_tokens (user_id);

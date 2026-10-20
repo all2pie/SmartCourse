@@ -1,19 +1,11 @@
 package identity
 
-import (
-	"time"
+import "github.com/google/uuid"
 
-	"github.com/google/uuid"
-)
-
+// RefreshToken is what the token store keeps per issued refresh token (keyed by its hash).
 type RefreshToken struct {
-	ID        uuid.UUID `gorm:"type:uuid;primaryKey;default:gen_random_uuid()"`
-	UserID    uuid.UUID `gorm:"type:uuid;not null"`
-	FamilyID  uuid.UUID `gorm:"type:uuid;not null"`
-	TokenHash []byte    `gorm:"not null"`
-	ExpiresAt time.Time `gorm:"not null"`
-	RevokedAt *time.Time
-	CreatedAt time.Time
+	UserID   uuid.UUID
+	FamilyID uuid.UUID
 }
 
 // TokenPair is the login/refresh response body (OAuth 2.0 token response field names).

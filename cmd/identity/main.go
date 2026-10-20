@@ -4,11 +4,13 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"time"
 
 	"github.com/all2pie/go-smart-course/internal/identity"
 	"github.com/all2pie/go-smart-course/internal/platform/auth"
 	"github.com/all2pie/go-smart-course/internal/platform/config"
 	"github.com/all2pie/go-smart-course/internal/platform/postgres"
+	"github.com/all2pie/go-smart-course/internal/platform/redisdb"
 	"github.com/all2pie/go-smart-course/internal/platform/web"
 )
 
@@ -28,9 +30,17 @@ func main() {
 		log.Fatalf("invalid JWT_SECRET: %v", err)
 	}
 
-	svc, err := identity.NewService(identity.NewRepository(db), tokens, cfg.AccessTokenTTL, cfg.RefreshTokenTTL)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	rdb, err := redisdb.Connect(ctx, cfg.Redis)
+	cancel()
 	if err != nil {
-		log.Fatalf("failed to create service: %v", err)
+		log.Fatalf("failed to connect to redis: %v", err)
+	}
+
+	users := identity.NewRepository(db)
+	authSvc, err := identity.NewAuthService(users, identity.NewTokenStore(rdb), tokens, cfg.AccessTokenTTL, cfg.RefreshTokenTTL)
+	if err != nil {
+		log.Fatalf("failed to create auth service: %v", err)
 	}
 
 	router, err := web.NewRouter(cfg.AppEnv)
@@ -45,8 +55,11 @@ func main() {
 		}
 		return sqlDB.PingContext(ctx)
 	}))
+	router.GET("/health/redis", web.Health(func(ctx context.Context) error {
+		return rdb.Ping(ctx).Err()
+	}))
 
-	identity.NewHandler(svc).RegisterRoutes(router)
+	identity.NewHandler(identity.NewService(users), authSvc).RegisterRoutes(router)
 
 	log.Printf("identity service starting: env=%s port=%d", cfg.AppEnv, cfg.Port)
 	if err := router.Run(fmt.Sprintf(":%d", cfg.Port)); err != nil {

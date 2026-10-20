@@ -42,7 +42,7 @@ func (h *Handler) login(c *gin.Context) error {
 		return err
 	}
 
-	pair, err := h.service.Login(c.Request.Context(), req.Email, req.Password)
+	pair, err := h.auth.Login(c.Request.Context(), req.Email, req.Password)
 	if err != nil {
 		return err
 	}
@@ -61,7 +61,7 @@ func (h *Handler) refresh(c *gin.Context) error {
 		return err
 	}
 
-	pair, err := h.service.Refresh(c.Request.Context(), req.RefreshToken)
+	pair, err := h.auth.Refresh(c.Request.Context(), req.RefreshToken)
 	if err != nil {
 		return err
 	}
@@ -76,7 +76,7 @@ func (h *Handler) logout(c *gin.Context) error {
 		return err
 	}
 
-	if err := h.service.Logout(c.Request.Context(), req.RefreshToken); err != nil {
+	if err := h.auth.Logout(c.Request.Context(), req.RefreshToken); err != nil {
 		return err
 	}
 

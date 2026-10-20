@@ -12,10 +12,11 @@ import (
 
 type Handler struct {
 	service *Service
+	auth    *AuthService
 }
 
-func NewHandler(service *Service) *Handler {
-	return &Handler{service: service}
+func NewHandler(service *Service, auth *AuthService) *Handler {
+	return &Handler{service: service, auth: auth}
 }
 
 func (h *Handler) RegisterRoutes(router gin.IRouter) {

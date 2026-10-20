@@ -20,10 +20,14 @@ import (
 	"golang.org/x/term"
 
 	"github.com/all2pie/go-smart-course/internal/identity"
-	"github.com/all2pie/go-smart-course/internal/platform/auth"
 	"github.com/all2pie/go-smart-course/internal/platform/config"
 	"github.com/all2pie/go-smart-course/internal/platform/postgres"
 )
+
+// adminConfig is the subset of Identity's settings this command needs: only the database.
+type adminConfig struct {
+	DB postgres.Config `envPrefix:"IDENTITY_DB_"`
+}
 
 func main() {
 	email := flag.String("email", "", "admin email (required)")
@@ -39,7 +43,7 @@ func main() {
 		log.Fatalf("reading password: %v", err)
 	}
 
-	cfg, err := config.Load[identity.Config]()
+	cfg, err := config.Load[adminConfig]()
 	if err != nil {
 		log.Fatalf("failed to load config: %v", err)
 	}
@@ -49,15 +53,7 @@ func main() {
 		log.Fatalf("failed to connect to database: %v", err)
 	}
 
-	tokens, err := auth.NewTokens(cfg.JWTSecret)
-	if err != nil {
-		log.Fatalf("invalid JWT_SECRET: %v", err)
-	}
-
-	svc, err := identity.NewService(identity.NewRepository(db), tokens, cfg.AccessTokenTTL, cfg.RefreshTokenTTL)
-	if err != nil {
-		log.Fatalf("failed to create service: %v", err)
-	}
+	svc := identity.NewService(identity.NewRepository(db))
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	u, err := svc.CreateAdmin(ctx, *name, *email, password)
