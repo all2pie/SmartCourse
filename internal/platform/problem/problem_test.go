@@ -45,6 +45,21 @@ func TestFrom(t *testing.T) {
 	}
 }
 
+func TestNewErrorDropsValues(t *testing.T) {
+	detail := &huma.ErrorDetail{Location: "body.password", Message: "expected length >= 8", Value: "hunter2"}
+	m, ok := problem.NewError(http.StatusUnprocessableEntity, "validation failed", detail).(*huma.ErrorModel)
+	if !ok {
+		t.Fatal("NewError did not return *huma.ErrorModel")
+	}
+	want := []*huma.ErrorDetail{{Location: "body.password", Message: "expected length >= 8"}}
+	if diff := cmp.Diff(want, m.Errors); diff != "" {
+		t.Fatalf("errors mismatch (-want +got):\n%s", diff)
+	}
+	if detail.Value != "hunter2" {
+		t.Fatal("NewError mutated the caller's detail")
+	}
+}
+
 func TestWrite(t *testing.T) {
 	rec := httptest.NewRecorder()
 	problem.Write(rec, http.StatusBadGateway, "upstream unavailable")

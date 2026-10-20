@@ -76,20 +76,20 @@ task run SERVICE=identity    # and catalog, gateway in other terminals
 Extra prerequisites: Go 1.27+, golangci-lint v2, and the migrate CLI built with both drivers:
 `go install -tags 'postgres mongodb' github.com/golang-migrate/migrate/v4/cmd/migrate@latest`.
 
-| Task                                           | What it does                                           |
-| ---------------------------------------------- | ------------------------------------------------------ |
-| `task up` / `task down` / `task logs`          | Whole stack in Docker                                  |
-| `task infra:up` / `task infra:down`            | Only Postgres, MongoDB, Redis                          |
-| `task run SERVICE=<name>`                      | Run one service on the host                            |
-| `task build`                                   | Build all binaries into `bin/`                         |
-| `task migrate:up\|down\|create SERVICE=<name>` | Database migrations (SQL for Postgres, JSON for Mongo) |
-| `task check`                                   | Format + lint (run before every commit)                |
+| Task                                           | What it does                                                   |
+| ---------------------------------------------- | -------------------------------------------------------------- |
+| `task up` / `task down` / `task logs`          | Whole stack in Docker                                          |
+| `task infra:up` / `task infra:down`            | Only Postgres, MongoDB, Redis                                  |
+| `task run SERVICE=<name>`                      | Run one service on the host                                    |
+| `task build`                                   | Build all binaries into `bin/`                                 |
+| `task migrate:up\|down\|create SERVICE=<name>` | Database migrations (SQL for Postgres, JSON for Mongo)         |
+| `task check`                                   | Format + lint (run before every commit)                        |
 | `task api:gen` / `task api:check`              | Regenerate the OpenAPI contract / fail if stale or lint errors |
-| `task api:lint`                                | Lint the OpenAPI contract                              |
-| `task test`                                    | Unit tests (race detector, no dependencies)            |
-| `task test:integration`                        | Repository tests on real databases (testcontainers)    |
-| `task test:e2e`                                | End-to-end + OpenAPI contract tests (after `task up`)  |
-| `task admin:create -- -email ...`              | Create an admin account                                |
+| `task api:lint`                                | Lint the OpenAPI contract                                      |
+| `task test`                                    | Unit tests (race detector, no dependencies)                    |
+| `task test:integration`                        | Repository tests on real databases (testcontainers)            |
+| `task test:e2e`                                | End-to-end + OpenAPI contract tests (after `task up`)          |
+| `task admin:create -- -email ...`              | Create an admin account                                        |
 
 ## API overview
 

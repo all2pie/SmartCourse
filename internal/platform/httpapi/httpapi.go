@@ -31,6 +31,7 @@ func New(router *gin.Engine, title, version string) huma.API {
 func Config(title, version string) huma.Config {
 	// Lists are always returned as arrays, never null.
 	huma.DefaultArrayNullable = false
+	huma.NewError = problem.NewError
 
 	cfg := huma.DefaultConfig(title, version)
 	// The gateway serves the single public document, so services expose no docs routes.

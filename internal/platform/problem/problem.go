@@ -15,6 +15,23 @@ import (
 
 const ContentType = "application/problem+json"
 
+var humaNewError = huma.NewError
+
+// NewError replaces huma.NewError so error details never echo submitted values (passwords, tokens).
+func NewError(status int, msg string, errs ...error) huma.StatusError {
+	se := humaNewError(status, msg, errs...)
+	if m, ok := se.(*huma.ErrorModel); ok {
+		for i, d := range m.Errors {
+			if d != nil && d.Value != nil {
+				c := *d
+				c.Value = nil
+				m.Errors[i] = &c
+			}
+		}
+	}
+	return se
+}
+
 // From converts a domain error into a problem. Unknown errors are logged and become a bare 500
 // so internals never reach clients.
 func From(err error) huma.StatusError {

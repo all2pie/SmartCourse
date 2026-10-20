@@ -182,7 +182,7 @@ Keys are namespaced by owning service (`identity:` today; `gateway:` for rate li
 
 - **Configuration:** environment variables parsed into a per-service struct (`config.Load[T]`); service variables are prefixed (`IDENTITY_DB_NAME`), shared ones are not (`JWT_SECRET`). A root `.env` is loaded for local development only.
 - **Validation:** Huma validates requests against the generated JSON Schema (struct tags such as `minLength`, `format:"email"`, `enum`) and rejects unknown fields; domain rules stay in services. Malformed JSON is a 400; a well-formed request that fails validation is a 422 listing each failing field.
-- **Errors:** every error, from services, Huma validation, the gateway (401, 502) and router fallbacks (404, 405, panics), is an RFC 9457 problem (`application/problem+json`, Huma's `ErrorModel`: `title`, `status`, `detail`, optional `errors[]` with `location`/`message`/`value`). `type` is the RFC default `about:blank`.
+- **Errors:** every error, from services, Huma validation, the gateway (401, 502) and router fallbacks (404, 405, panics), is an RFC 9457 problem (`application/problem+json`, Huma's `ErrorModel`: `title`, `status`, `detail`, optional `errors[]` with `location`/`message`). `type` is the RFC default `about:blank`. Error details never echo the submitted value (Huma's default `value`), since it may be a password, token or the raw malformed body.
 - **Pagination:** `limit`/`offset`, default 20, max 100, response `{items,total,limit,offset}` with `items` never `null`.
 - **Secrets in logs:** GORM logs SQL with placeholders only; tokens and password hashes are never logged or serialized.
 - **Health:** every service exposes `/ping`; Identity and Catalog also expose `/health/<dependency>` (`/health/db`, and `/health/redis` on Identity).
@@ -198,21 +198,21 @@ Keys are namespaced by owning service (`identity:` today; `gateway:` for rate li
 
 ## 9. Decisions and tradeoffs
 
-| #   | Decision             | Choice                                                       | Why / tradeoff                                                                |
-| --- | -------------------- | ------------------------------------------------------------ | ----------------------------------------------------------------------------- |
-| A1  | Granularity          | 6 coarse services                                            | Clear ownership without nano-services; can split later                        |
-| A2  | Catalog store        | MongoDB, course = one document with embedded modules/lessons | Natural aggregate, atomic reorder; cross-course queries need indexes          |
-| A3  | Service protocol     | REST via gateway reverse proxy                               | Simple, debuggable; Protobuf only for Kafka events (W3)                       |
-| A4  | Repo layout          | Monorepo, one module                                         | Shared tooling and atomic refactors; services still deploy independently      |
-| A5  | JWT signing          | HS256, secret only in Identity + gateway                     | Simple; RS256/JWKS is the hardening path if more verifiers appear             |
-| A6  | Caller identity      | Gateway forwards `X-User-*`; services trust it               | No token code in services; relies on network isolation (services unpublished) |
-| A7  | Mongo client / IDs   | Official driver v2, UUID strings                             | No ODM magic; consistent IDs across stores at a small size cost               |
-| A8  | Mongo migrations     | golang-migrate JSON commands                                 | One tool and workflow for all databases; versioned, reviewable                |
-| A9  | Per-service DB users | Deferred                                                     | Ownership by convention for now; separate roles/users are a stretch goal      |
-| A10 | Sessions             | Short JWT + rotating refresh tokens in Redis                 | Revocable sessions and theft detection; parallel refresh = logout (see §4.2)  |
-| A11 | Gateway auth         | Secure by default (explicit public allowlist)                | New routes can't be accidentally exposed                                      |
-| A12 | Admin bootstrap      | Operator CLI                                                 | No standing admin credentials in config or over HTTP                          |
-| O1  | API definition       | Code-first with Huma v2 on Gin; RFC 9457 errors               | One source for routing, validation and docs; rejected swaggest (separate operation list), swaggo (Swagger 2.0), Fuego (pre-1.0), hand-written spec (drifts) |
+| #   | Decision             | Choice                                                       | Why / tradeoff                                                                                                                                              |
+| --- | -------------------- | ------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A1  | Granularity          | 6 coarse services                                            | Clear ownership without nano-services; can split later                                                                                                      |
+| A2  | Catalog store        | MongoDB, course = one document with embedded modules/lessons | Natural aggregate, atomic reorder; cross-course queries need indexes                                                                                        |
+| A3  | Service protocol     | REST via gateway reverse proxy                               | Simple, debuggable; Protobuf only for Kafka events (W3)                                                                                                     |
+| A4  | Repo layout          | Monorepo, one module                                         | Shared tooling and atomic refactors; services still deploy independently                                                                                    |
+| A5  | JWT signing          | HS256, secret only in Identity + gateway                     | Simple; RS256/JWKS is the hardening path if more verifiers appear                                                                                           |
+| A6  | Caller identity      | Gateway forwards `X-User-*`; services trust it               | No token code in services; relies on network isolation (services unpublished)                                                                               |
+| A7  | Mongo client / IDs   | Official driver v2, UUID strings                             | No ODM magic; consistent IDs across stores at a small size cost                                                                                             |
+| A8  | Mongo migrations     | golang-migrate JSON commands                                 | One tool and workflow for all databases; versioned, reviewable                                                                                              |
+| A9  | Per-service DB users | Deferred                                                     | Ownership by convention for now; separate roles/users are a stretch goal                                                                                    |
+| A10 | Sessions             | Short JWT + rotating refresh tokens in Redis                 | Revocable sessions and theft detection; parallel refresh = logout (see §4.2)                                                                                |
+| A11 | Gateway auth         | Secure by default (explicit public allowlist)                | New routes can't be accidentally exposed                                                                                                                    |
+| A12 | Admin bootstrap      | Operator CLI                                                 | No standing admin credentials in config or over HTTP                                                                                                        |
+| O1  | API definition       | Code-first with Huma v2 on Gin; RFC 9457 errors              | One source for routing, validation and docs; rejected swaggest (separate operation list), swaggo (Swagger 2.0), Fuego (pre-1.0), hand-written spec (drifts) |
 
 Open domain decisions (publishing, lessons, enrollment rules, search) are tracked in [PLAN.md](../PLAN.md).
 

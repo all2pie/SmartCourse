@@ -128,4 +128,5 @@ Goal: prove the rules that matter (access control, token security, session rotat
 | 2026-10-20         | Migration 000003 deleted (no `refresh_tokens` table; local DB rolled back to v2); test tooling decided (go-cmp, testcontainers) | `4a86031`             |
 | 2026-10-20         | Decided O1: Huma code-first API + RFC 9457 errors (planned as 1.9; tests move to 1.10)                                          | `b50a9c6`             |
 | 2026-10-20         | 1.9: 10 operations on Huma, generated `api/openapi.yaml` (`task api:gen`/`api:check`), problem+json everywhere, `Invalid` → 422 | `625f603`             |
-| 2026-10-20         | 1.10: unit, integration (testcontainers) and e2e + OpenAPI contract tests; `task test`, `test:integration`, `test:e2e`        | *(this commit)*       |
+| 2026-10-20         | 1.10: unit, integration (testcontainers) and e2e + OpenAPI contract tests; `task test`, `test:integration`, `test:e2e`          | `a380f20`             |
+| 2026-10-20         | Error details no longer echo submitted values (passwords in 422s, raw body in 400s)                                             | *(this commit)*       |

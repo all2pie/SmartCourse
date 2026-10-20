@@ -51,6 +51,25 @@ func TestHandlerRegister(t *testing.T) {
 	}
 }
 
+func TestHandlerErrorsDoNotEchoSecrets(t *testing.T) {
+	api, _ := newTestAPI(t)
+	const secret = "s3cr3t!"
+
+	rec := api.Post("/auth/register", map[string]any{"name": "X", "email": "x@example.com", "password": secret, "role": "student"})
+	if p := testutil.Problem(t, rec, http.StatusUnprocessableEntity); len(p.Errors) == 0 || p.Errors[0].Location != "body.password" {
+		t.Fatalf("problem = %+v", p)
+	}
+	if strings.Contains(rec.Body.String(), secret) {
+		t.Fatalf("422 echoes the password: %s", rec.Body)
+	}
+
+	rec = api.Post("/auth/login", "Content-Type: application/json", strings.NewReader(`{"email":"x@example.com","password":"`+secret+`"`))
+	testutil.Problem(t, rec, http.StatusBadRequest)
+	if strings.Contains(rec.Body.String(), secret) {
+		t.Fatalf("400 echoes the raw body: %s", rec.Body)
+	}
+}
+
 func TestHandlerSession(t *testing.T) {
 	api, f := newTestAPI(t)
 

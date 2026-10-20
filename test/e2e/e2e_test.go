@@ -202,7 +202,11 @@ func TestEndToEnd(t *testing.T) {
 	instructorID := r.str(t, "id")
 
 	expectProblem(t, register("A", fmt.Sprintf("adm%d@example.com", run), "longpassword1", "admin"), http.StatusUnprocessableEntity, "self-register as admin")
-	expectProblem(t, register("X", fmt.Sprintf("x%d@example.com", run), "short", "student"), http.StatusUnprocessableEntity, "short password")
+	r = register("X", fmt.Sprintf("x%d@example.com", run), "s3cr3t!", "student")
+	expectProblem(t, r, http.StatusUnprocessableEntity, "short password")
+	if bytes.Contains(r.body, []byte("s3cr3t!")) {
+		t.Errorf("validation error echoes the password: %s", r.body)
+	}
 	expectProblem(t, register("X", fmt.Sprintf("x%d@example.com", run), strings.Repeat("a", 73), "student"), http.StatusUnprocessableEntity, "73-byte password")
 	expectProblem(t, register("Ivy", instructorEmail, "instructorpass1", "instructor"), http.StatusConflict, "duplicate email")
 
