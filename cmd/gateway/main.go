@@ -27,7 +27,8 @@ func main() {
 	}
 
 	router.Use(gateway.RequestID(), gateway.StripIdentityHeaders())
-	gateway.RegisterDocs(router)
+	// Production publishes the spec but not the interactive docs UI.
+	gateway.RegisterDocs(router, cfg.AppEnv != "production")
 	gateway.RegisterRoutes(router, *cfg, tokens)
 
 	log.Printf("gateway starting: env=%s port=%d identity=%s catalog=%s",

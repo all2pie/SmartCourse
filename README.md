@@ -36,7 +36,7 @@ cp .env.example .env
 task up          # builds images, runs migrations, starts everything
 ```
 
-- API docs (Swagger UI): <http://localhost:8000/docs>
+- API docs (Swagger UI, self-hosted; not served when `APP_ENV=production`): <http://localhost:8000/docs>
 - OpenAPI contract: <http://localhost:8000/openapi.yaml> (generated from the Go operations into [api/openapi.yaml](api/openapi.yaml) by `task api:gen`)
 - Errors are [RFC 9457](https://www.rfc-editor.org/rfc/rfc9457) problem details (`application/problem+json`): malformed JSON is a 400, failed validation a 422 listing the fields in `errors` (submitted values are never echoed back).
 
@@ -87,6 +87,7 @@ Integration tests need Docker; e2e tests need `task up` and a host `.env` (they 
 | `task check`                                   | Format + lint (run before every commit)                        |
 | `task api:gen` / `task api:check`              | Regenerate the OpenAPI contract / fail if stale or lint errors |
 | `task api:lint`                                | Lint the OpenAPI contract                                      |
+| `task docs:update VERSION=x.y.z`               | Vendor a Swagger UI release into the gateway (hash-checked)    |
 | `task test`                                    | Unit tests (race detector, no dependencies)                    |
 | `task test:integration`                        | Repository tests on real databases (testcontainers)            |
 | `task test:e2e`                                | End-to-end + OpenAPI contract tests (after `task up`)          |

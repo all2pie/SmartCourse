@@ -110,6 +110,22 @@ tasks:
       - git diff --exit-code api/openapi.yaml
       - task: api:lint
 
+  docs:update:
+    desc: 'Vendor a Swagger UI release into the gateway (usage: task docs:update VERSION=5.34.0)'
+    requires:
+      vars: [VERSION]
+    vars:
+      DIR: internal/gateway/swaggerui
+      TGZ: /tmp/swagger-ui-dist-{{.VERSION}}.tgz
+    cmds:
+      - curl -fsSL -o {{.TGZ}} https://registry.npmjs.org/swagger-ui-dist/-/swagger-ui-dist-{{.VERSION}}.tgz
+      # Refuse a tarball that doesn't match the integrity hash npm published for this version.
+      - test "$(curl -fsSL https://registry.npmjs.org/swagger-ui-dist/{{.VERSION}} | jq -r .dist.integrity)" = "sha512-$(openssl dgst -sha512 -binary {{.TGZ}} | base64 -w0)"
+      - mkdir -p {{.DIR}}
+      - tar -xzf {{.TGZ}} -C {{.DIR}} --strip-components=1 package/swagger-ui-bundle.js package/swagger-ui.css package/swagger-ui-bundle.js.LICENSE.txt package/LICENSE package/NOTICE
+      - echo {{.VERSION}} > {{.DIR}}/VERSION
+      - rm {{.TGZ}}
+
   build:
     desc: Build every service binary into bin/
     cmds:

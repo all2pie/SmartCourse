@@ -259,6 +259,15 @@ func TestEndToEnd(t *testing.T) {
 	expect(t, c.do(http.MethodGet, "/users/me", "", nil, "Authorization: bearer "+instructorAT), http.StatusOK, "lowercase bearer")
 	expectProblem(t, c.do(http.MethodGet, "/nope", "", nil), http.StatusNotFound, "unknown route")
 
+	// The stack runs with APP_ENV=development, so the self-hosted docs UI is served.
+	for _, path := range []string{"/docs", "/docs/assets/swagger-ui-bundle.js", "/docs/assets/swagger-ui.css", "/docs/assets/init.js"} {
+		r := c.do(http.MethodGet, path, "", nil)
+		expect(t, r, http.StatusOK, path)
+		if !strings.HasPrefix(r.header.Get("Content-Security-Policy"), "default-src 'self';") {
+			t.Errorf("%s: Content-Security-Policy %q", path, r.header.Get("Content-Security-Policy"))
+		}
+	}
+
 	// Users.
 	r = c.do(http.MethodGet, "/users/"+studentID, instructorAT, nil)
 	expect(t, r, http.StatusOK, "another user's profile")

@@ -80,7 +80,7 @@ sequenceDiagram
     G-->>C: 200 + X-Request-ID
 ```
 
-- **Secure by default:** only `POST /auth/{register,login,refresh,logout}`, `/ping`, `/docs` and `/openapi.yaml` are public. Every other proxied route sits behind `Authenticate`; a new route is protected unless explicitly added to the public list.
+- **Secure by default:** only `POST /auth/{register,login,refresh,logout}`, `/ping`, `/openapi.yaml` and (outside production) `/docs` are public. Every other proxied route sits behind `Authenticate`; a new route is protected unless explicitly added to the public list.
 - **Header trust:** services trust `X-User-ID` / `X-User-Role` because only the gateway can reach them (only its port is published) and it always strips client-sent copies. Calling a service directly without these headers returns 401.
 - **Request IDs:** a client-sent `X-Request-ID` is kept only if it is a UUID (so arbitrary strings never reach logs); otherwise one is generated. It is forwarded and echoed.
 - **Upstream failure:** if a service is unreachable the gateway returns a `502` problem (`"detail": "upstream unavailable"`).
@@ -187,7 +187,8 @@ Keys are namespaced by owning service (`identity:` today; `gateway:` for rate li
 - **Secrets in logs:** GORM logs SQL with placeholders only; tokens and password hashes are never logged or serialized.
 - **Health:** every service exposes `/ping`; Identity and Catalog also expose `/health/<dependency>` (`/health/db`, and `/health/redis` on Identity).
 - **Testing:** three layers. Unit (`task test`, `-race`): policies, token verification (wrong algorithm/secret/issuer, missing claims), services with in-memory fakes, Huma operations via `humatest`, gateway middleware and proxying via `httptest`. Integration (`task test:integration`): repositories and the Redis token store against real Postgres/MongoDB/Redis started by testcontainers with the real migrations (unique email, UUID-as-string storage, visibility filters and ordering, 20 concurrent rotations → exactly one wins). End-to-end (`task test:e2e`): the full register → login → courses → refresh/reuse → logout → admin flow through the gateway, with every response of a documented operation validated against `api/openapi.yaml` (kin-openapi, status codes included), so gateway-level drift Huma can't see (401/502 bodies, headers) fails the build.
-- **API contract:** [api/openapi.yaml](../api/openapi.yaml) (OpenAPI 3.1) is generated code-first: `cmd/openapi` registers every service's Huma operations onto one API (a path or schema-name clash between services panics), adds gateway-level parts (servers, `/ping`, 502s, `WWW-Authenticate`) and writes the file (`task api:gen`). `task api:check` fails if the committed file is stale or Redocly lint fails. The gateway serves it at `/openapi.yaml` with Swagger UI at `/docs` (UI assets load from the unpkg CDN, pinned version); services expose no docs routes.
+- **API contract:** [api/openapi.yaml](../api/openapi.yaml) (OpenAPI 3.1) is generated code-first: `cmd/openapi` registers every service's Huma operations onto one API (a path or schema-name clash between services panics), adds gateway-level parts (servers, `/ping`, 502s, `WWW-Authenticate`) and writes the file (`task api:gen`). `task api:check` fails if the committed file is stale or Redocly lint fails. The gateway serves it at `/openapi.yaml`; services expose no docs routes.
+- **Docs UI:** outside production (`APP_ENV != production`) the gateway serves Swagger UI at `/docs`, entirely from its own origin: the release is vendored in `internal/gateway/swaggerui` by `task docs:update VERSION=x` (which checks the npm tarball against npm's published sha512) and embedded in the binary. Every docs response carries `Content-Security-Policy: default-src 'self'` (plus inline styles and `data:` images, which Swagger UI needs) and `nosniff`, and the external validator badge is disabled, so no third-party code runs next to tokens pasted into "Authorize". Production serves only the spec.
 
 ## 8. Local environment and delivery
 
@@ -212,9 +213,12 @@ Keys are namespaced by owning service (`identity:` today; `gateway:` for rate li
 | A10 | Sessions             | Short JWT + rotating refresh tokens in Redis                 | Revocable sessions and theft detection; parallel refresh = logout (see §4.2)                                                                                |
 | A11 | Gateway auth         | Secure by default (explicit public allowlist)                | New routes can't be accidentally exposed                                                                                                                    |
 | A12 | Admin bootstrap      | Operator CLI                                                 | No standing admin credentials in config or over HTTP                                                                                                        |
-| O1  | API definition       | Code-first with Huma v2 on Gin; RFC 9457 errors              | One source for routing, validation and docs; rejected swaggest (separate operation list), swaggo (Swagger 2.0), Fuego (pre-1.0), hand-written spec (drifts) || T1  | Test assertions      | Standard library + go-cmp                                    | Idiomatic, readable diffs, no assertion-library lock-in                                                                                                     |
+| O1  | API definition       | Code-first with Huma v2 on Gin; RFC 9457 errors              | One source for routing, validation and docs; rejected swaggest (separate operation list), swaggo (Swagger 2.0), Fuego (pre-1.0), hand-written spec (drifts) |
+| O2  | Docs UI              | Swagger UI vendored into the gateway; off in production      | No third-party script on the API's origin, strict CSP, works offline; ~1.9 MB in the repo/binary, upgrades via `task docs:update`; rejected CDN + SRI hashes |
+| T1  | Test assertions      | Standard library + go-cmp                                    | Idiomatic, readable diffs, no assertion-library lock-in                                                                                                     |
 | T2  | Test databases       | testcontainers-go with the real migrations                   | Self-contained and CI-ready; needs Docker and a few seconds per package                                                                                     |
 | T3  | Contract tests       | kin-openapi validates every e2e response against the spec    | Catches gateway-level drift Huma can't see; only covers responses the e2e flow exercises                                                                    |
+
 Open domain decisions (publishing, lessons, enrollment rules, search) are tracked in [PLAN.md](../PLAN.md).
 
 ## 10. Known limitations
@@ -224,4 +228,3 @@ Open domain decisions (publishing, lessons, enrollment rules, search) are tracke
 - Services do not shut down gracefully yet (in-flight requests are cut on stop).
 - All services share the database admin user locally (A9).
 - No CI yet: every check (`task check`, `api:check`, the three test layers) runs locally only.
-- The `/docs` page loads Swagger UI from the unpkg CDN, so it needs internet access (the spec itself is served locally).

@@ -131,4 +131,5 @@ Goal: prove the rules that matter (access control, token security, session rotat
 | 2026-10-20         | 1.9: 10 operations on Huma, generated `api/openapi.yaml` (`task api:gen`/`api:check`), problem+json everywhere, `Invalid` → 422 | `625f603`             |
 | 2026-10-20         | 1.10: unit, integration (testcontainers) and e2e + OpenAPI contract tests; `task test`, `test:integration`, `test:e2e`          | `a380f20`             |
 | 2026-10-20         | Error details no longer echo submitted values (passwords in 422s, raw body in 400s)                                             | `675cbd1`             |
-| 2026-10-20         | Docs brought up to date after 1.9/1.10 (test tooling decisions in design.md, AGENTS gotchas, CI gap noted)                      | *(this commit)*       |
+| 2026-10-20         | Docs brought up to date after 1.9/1.10 (test tooling decisions in design.md, AGENTS gotchas, CI gap noted)                      | `e8e6d67`             |
+| 2026-10-20         | Decided O2: Swagger UI vendored into the gateway (hash-checked `task docs:update`, CSP `default-src 'self'`), `/docs` off in production | *(this commit)*       |
