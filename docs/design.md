@@ -218,8 +218,13 @@ Keys are namespaced by owning service (`identity:` today; `gateway:` for rate li
 | T1  | Test assertions      | Standard library + go-cmp                                    | Idiomatic, readable diffs, no assertion-library lock-in                                                                                                      |
 | T2  | Test databases       | testcontainers-go with the real migrations                   | Self-contained and CI-ready; needs Docker and a few seconds per package                                                                                      |
 | T3  | Contract tests       | kin-openapi validates every e2e response against the spec    | Catches gateway-level drift Huma can't see; only covers responses the e2e flow exercises                                                                     |
+| D1  | Editing published    | Draft revision + republish; students see the last published version | Updates pass the same validation as first publish; needs a second copy of the content (revision) per course                                           |
+| D2  | Lesson types         | Video, document, article, external link; no quizzes          | Covers the PRD's learning materials; no grading model to build                                                                                               |
+| D3  | Lesson files         | URL references only; no storage service                      | No MinIO or upload path to run and secure; instructors host files elsewhere, so publish validation can only check URL shape/reachability                    |
+| D4  | Enrollment rules     | Free self-enrollment; optional capacity and prerequisites; drop and re-enroll with history | Covers duplicates, limits, prerequisites and history from the PRD; no approval flow                                                    |
+| D6  | Search               | MongoDB text index inside Catalog                            | No new infrastructure; basic relevance and filters, the publish "search index" step just refreshes the indexed fields; a dedicated engine is a stretch goal  |
 
-Open domain decisions (publishing, lessons, enrollment rules, search) are tracked in [PLAN.md](../PLAN.md).
+Open domain decisions (workers, completion) are tracked in [PLAN.md](../PLAN.md).
 
 ## 10. Known limitations
 

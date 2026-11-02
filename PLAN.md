@@ -2,17 +2,12 @@
 
 Roadmap, open decisions and progress. For how the system works see [docs/design.md](docs/design.md); for conventions and workflow see [AGENTS.md](AGENTS.md). Scope comes from [Requirements.md](Requirements.md); the 3-week delivery structure (mentor review at the end of each week) from [Guidelines.md](Guidelines.md).
 
-**Now:** Week 1 mentor review; then Week 2 starts with 2.0 (decide D1–D4, D6).
+**Now:** Week 1 mentor review; Week 2 decisions made (2.0), next is 2.1 content structure.
 
 ## Open decisions
 
 | #   | Decision                   | Proposal                                                                                            | Needed by    |
 | --- | -------------------------- | --------------------------------------------------------------------------------------------------- | ------------ |
-| D1  | Editing a published course | Draft revision + republish; students see the last published version                                 | Week 2       |
-| D2  | Lesson types               | Video, document, article, external link; no quizzes                                                 | Week 2       |
-| D3  | Lesson files               | Uploads to MinIO via presigned URLs                                                                 | Week 2       |
-| D4  | Enrollment rules           | Free self-enrollment; optional capacity and prerequisites; drop and re-enroll with history          | Week 2       |
-| D6  | Search                     | MongoDB text index inside Catalog                                                                   | Week 2       |
 | W1  | Workers                    | Which jobs use Asynq/Temporal vs a hand-rolled worker pool (the PRD wants concurrency demonstrated) | Week 3 (3.3) |
 | D5  | Completion                 | Student marks lessons complete → enrollment completed → certificate                                 | Stretch      |
 
@@ -32,7 +27,7 @@ Roadmap, open decisions and progress. For how the system works see [docs/design.
 - [ ] Week 1 mentor review
 
 ### Week 2 — Enrollment + publishing workflow
-- [ ] 2.0 Decide D1–D4, D6
+- [x] 2.0 Decide D1–D4, D6 (decided 2026-11-02, see design.md §9: draft revision + republish; 4 lesson types; URL references only, no MinIO; free enrollment with optional capacity/prerequisites and history; Mongo text search)
 - [ ] 2.1 Content structure: modules and lessons embedded in the course (create, list, rename, delete, reorder)
 - [ ] 2.2 Course state machine: `draft → publishing → published | publish_failed`, `published → archived`
 - [ ] 2.3 Temporal publish workflow: parallel validation, then parallel side effects; idempotent activities, retries, partial failure; goroutines/WaitGroup/channels/context demonstrated
@@ -133,3 +128,4 @@ Goal: prove the rules that matter (access control, token security, session rotat
 | 2026-10-20         | Error details no longer echo submitted values (passwords in 422s, raw body in 400s)                                                     | `675cbd1`             |
 | 2026-10-20         | Docs brought up to date after 1.9/1.10 (test tooling decisions in design.md, AGENTS gotchas, CI gap noted)                              | `e8e6d67`             |
 | 2026-10-20         | Decided O2: Swagger UI vendored into the gateway (hash-checked `task docs:update`, CSP `default-src 'self'`), `/docs` off in production | *(this commit)*       |
+| 2026-11-02         | 2.0: decided D1–D4, D6 (URL-only lesson files, no MinIO)                                                                                | *(this commit)*       |
