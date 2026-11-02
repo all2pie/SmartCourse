@@ -2,6 +2,7 @@ package catalog
 
 import (
 	"context"
+	"errors"
 
 	"github.com/google/uuid"
 
@@ -53,7 +54,27 @@ func (s *Service) Create(ctx context.Context, actor auth.Actor, in CreateInput) 
 }
 
 // GetByID reports courses the actor may not see as not found, so their existence isn't leaked.
+// Editors see their unpublished working copy; everyone else sees the published content.
 func (s *Service) GetByID(ctx context.Context, actor auth.Actor, id uuid.UUID) (*Course, error) {
+	c, err := s.visible(ctx, actor, id)
+	if err != nil {
+		return nil, err
+	}
+	if !canEdit(actor, c) {
+		return c, nil
+	}
+
+	rev, err := s.repo.GetRevision(ctx, id)
+	if errors.Is(err, ErrNoRevision) {
+		return c, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return withRevision(c, rev), nil
+}
+
+func (s *Service) visible(ctx context.Context, actor auth.Actor, id uuid.UUID) (*Course, error) {
 	c, err := s.repo.GetByID(ctx, id)
 	if err != nil {
 		return nil, err
@@ -70,20 +91,21 @@ type UpdateInput struct {
 	Description *string
 }
 
+// Update changes the working copy; students keep seeing the published version until it is republished.
 func (s *Service) Update(ctx context.Context, actor auth.Actor, id uuid.UUID, in UpdateInput) (*Course, error) {
 	if in.Title == nil && in.Description == nil {
 		return nil, ErrNothingToUpdate
 	}
 
-	c, err := s.GetByID(ctx, actor, id)
-	if err != nil {
-		return nil, err
-	}
-	if !canEdit(actor, c) {
-		return nil, ErrNotOwner
-	}
-
-	return s.repo.Update(ctx, id, in)
+	return s.edit(ctx, actor, id, func(r *Revision) error {
+		if in.Title != nil {
+			r.Title = *in.Title
+		}
+		if in.Description != nil {
+			r.Description = *in.Description
+		}
+		return nil
+	})
 }
 
 type ListInput struct {

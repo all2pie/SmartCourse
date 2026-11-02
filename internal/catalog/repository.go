@@ -14,7 +14,12 @@ import (
 	"github.com/all2pie/go-smart-course/internal/platform/errs"
 )
 
-var ErrNotFound = errs.New(errs.NotFound, "course not found")
+var (
+	ErrNotFound = errs.New(errs.NotFound, "course not found")
+	// ErrNoRevision means the course has no unpublished edits; it is never returned to clients.
+	ErrNoRevision   = errs.New(errs.NotFound, "course has no draft revision")
+	ErrEditConflict = errs.New(errs.Conflict, "the course was changed concurrently, retry")
+)
 
 type ListFilter struct {
 	InstructorID *uuid.UUID
@@ -35,16 +40,23 @@ type ListResult struct {
 type Repository interface {
 	Create(ctx context.Context, c *Course) error
 	GetByID(ctx context.Context, id uuid.UUID) (*Course, error)
-	Update(ctx context.Context, id uuid.UUID, in UpdateInput) (*Course, error)
 	List(ctx context.Context, f ListFilter) (ListResult, error)
+
+	// GetRevision returns ErrNoRevision if the course has no draft.
+	GetRevision(ctx context.Context, courseID uuid.UUID) (*Revision, error)
+	// EnsureRevision returns the course's draft, creating it from the course's current content if missing.
+	EnsureRevision(ctx context.Context, c *Course) (*Revision, error)
+	// SaveRevision stores r if its Version is still current and bumps it; otherwise it returns ErrEditConflict.
+	SaveRevision(ctx context.Context, r *Revision) error
 }
 
 type mongoRepository struct {
-	courses *mongo.Collection
+	courses   *mongo.Collection
+	revisions *mongo.Collection
 }
 
 func NewRepository(db *mongo.Database) Repository {
-	return &mongoRepository{courses: db.Collection("courses")}
+	return &mongoRepository{courses: db.Collection("courses"), revisions: db.Collection("course_revisions")}
 }
 
 // now is truncated to Mongo's millisecond precision so returned values match what is stored.
@@ -74,28 +86,65 @@ func (r *mongoRepository) GetByID(ctx context.Context, id uuid.UUID) (*Course, e
 	return &c, nil
 }
 
-func (r *mongoRepository) Update(ctx context.Context, id uuid.UUID, in UpdateInput) (*Course, error) {
-	set := bson.D{{Key: "updated_at", Value: now()}}
-	if in.Title != nil {
-		set = append(set, bson.E{Key: "title", Value: *in.Title})
+func (r *mongoRepository) GetRevision(ctx context.Context, courseID uuid.UUID) (*Revision, error) {
+	var rev Revision
+	if err := r.revisions.FindOne(ctx, bson.D{{Key: "_id", Value: courseID}}).Decode(&rev); err != nil {
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			return nil, ErrNoRevision
+		}
+		return nil, fmt.Errorf("fetching revision: %w", err)
 	}
-	if in.Description != nil {
-		set = append(set, bson.E{Key: "description", Value: *in.Description})
+	return &rev, nil
+}
+
+func (r *mongoRepository) EnsureRevision(ctx context.Context, c *Course) (*Revision, error) {
+	ts := now()
+	initial := Revision{
+		Title: c.Title, Description: c.Description, Modules: c.Modules, CreatedAt: ts, UpdatedAt: ts,
+	}
+	opts := options.FindOneAndUpdate().SetUpsert(true).SetReturnDocument(options.After)
+
+	// Two first edits can race on the upsert; the loser gets a duplicate key error and just reads the winner's copy.
+	for range 2 {
+		var rev Revision
+		err := r.revisions.FindOneAndUpdate(ctx,
+			bson.D{{Key: "_id", Value: c.ID}},
+			bson.D{{Key: "$setOnInsert", Value: bson.D{
+				{Key: "title", Value: initial.Title},
+				{Key: "description", Value: initial.Description},
+				{Key: "modules", Value: initial.Modules},
+				{Key: "version", Value: int64(0)},
+				{Key: "created_at", Value: initial.CreatedAt},
+				{Key: "updated_at", Value: initial.UpdatedAt},
+			}}},
+			opts,
+		).Decode(&rev)
+		if err == nil {
+			return &rev, nil
+		}
+		if !mongo.IsDuplicateKeyError(err) {
+			return nil, fmt.Errorf("ensuring revision: %w", err)
+		}
+	}
+	return nil, ErrEditConflict
+}
+
+func (r *mongoRepository) SaveRevision(ctx context.Context, rev *Revision) error {
+	next := *rev
+	next.Version++
+	next.UpdatedAt = now()
+
+	res, err := r.revisions.ReplaceOne(ctx,
+		bson.D{{Key: "_id", Value: rev.ID}, {Key: "version", Value: rev.Version}}, next)
+	if err != nil {
+		return fmt.Errorf("saving revision: %w", err)
+	}
+	if res.MatchedCount == 0 {
+		return ErrEditConflict
 	}
 
-	var c Course
-	err := r.courses.FindOneAndUpdate(ctx,
-		bson.D{{Key: "_id", Value: id}},
-		bson.D{{Key: "$set", Value: set}},
-		options.FindOneAndUpdate().SetReturnDocument(options.After),
-	).Decode(&c)
-	if err != nil {
-		if errors.Is(err, mongo.ErrNoDocuments) {
-			return nil, ErrNotFound
-		}
-		return nil, fmt.Errorf("updating course: %w", err)
-	}
-	return &c, nil
+	*rev = next
+	return nil
 }
 
 func (r *mongoRepository) List(ctx context.Context, f ListFilter) (ListResult, error) {

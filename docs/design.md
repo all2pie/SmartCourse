@@ -38,7 +38,7 @@ Solid lines exist today; dotted lines arrive in the week shown.
 | ------------ | -------------------------------------------------------------- | --------------------------------------- | ------ |
 | Gateway      | Nothing persistent; routing, authentication, request IDs, docs | —                                       | Built  |
 | Identity     | Users, roles, password hashes, login sessions                  | Postgres `identity`, Redis `identity:*` | Built  |
-| Catalog      | Courses (later modules, lessons, publishing)                   | MongoDB `catalog`                       | Built  |
+| Catalog      | Courses, modules and lessons (later publishing)                | MongoDB `catalog`                       | Built  |
 | Enrollment   | Enrollments, progress, local course replica                    | Postgres `enrollment`                   | Week 2 |
 | Analytics    | Metrics computed from events                                   | MongoDB `analytics`                     | Week 3 |
 | Notification | Asynchronous delivery                                          | Redis (Asynq)                           | Week 3 |
@@ -141,6 +141,7 @@ sequenceDiagram
 | Only instructors create courses                                                | `catalog/service.go` |
 | Students see published courses; instructors also see their own; admins see all | `catalog/policy.go`  |
 | Only the owning instructor or an admin edits a course                          | `catalog/policy.go`  |
+| Only the owning instructor or an admin edits modules and lessons               | `catalog/policy.go`  |
 | `email` visible only to the user themselves or an admin                        | `identity/policy.go` |
 | Self-registration only as student or instructor                                | `identity/policy.go` |
 
@@ -167,12 +168,17 @@ Timestamps are stored in UTC at microsecond precision (Postgres' resolution) so 
 
 ```json
 { "_id": "uuid-string", "instructor_id": "uuid-string", "title": "Go 101", "description": "",
-  "status": "draft", "created_at": ISODate, "updated_at": ISODate }
+  "status": "draft", "modules": [ { "id": "uuid", "title": "Basics",
+    "lessons": [ { "id": "uuid", "title": "Intro", "type": "article", "body": "..." } ] } ],
+  "created_at": ISODate, "updated_at": ISODate }
 ```
 
+`courses` is the published version (what students read). Edits to title, description, modules and lessons go to `course_revisions`, one working copy per course (`_id` = course id, same fields plus `version`), created lazily from the course on the first edit. Editors (owner, admin) read the working copy when it exists; everyone else reads `courses`. The publish workflow (2.3) will copy a revision onto its course and remove it.
+
+- Lesson `type` is `video`, `document`, `external_link` (each with an http(s) `url`) or `article` (a `body`, no `url`). Limits: 100 modules per course, 100 lessons per module.
+- Module and lesson operations are read-modify-write on the revision with an optimistic `version` check (`ReplaceOne` filtered on the version it read); a lost race is retried up to 3 times, then returns 409. Reorder requests must list every ID exactly once.
 - IDs are UUIDs everywhere; Mongo stores them as canonical strings (a codec in `internal/platform/mongodb`) so they match other services and read cleanly in `mongosh`.
-- Indexes: `{status, created_at:-1, _id}` (student lists) and `{instructor_id, created_at:-1, _id}` (instructor lists). Lists sort by `created_at DESC, _id` for stable pagination.
-- In Week 2 modules and lessons are embedded as ordered arrays (reorder = array update).
+- Indexes: `{status, created_at:-1, _id}` (student lists) and `{instructor_id, created_at:-1, _id}` (instructor lists). Lists sort by `created_at DESC, _id` for stable pagination and show the published version.
 
 ### 6.3 Redis
 
@@ -199,30 +205,31 @@ Keys are namespaced by owning service (`identity:` today; `gateway:` for rate li
 
 ## 9. Decisions and tradeoffs
 
-| #   | Decision             | Choice                                                       | Why / tradeoff                                                                                                                                               |
-| --- | -------------------- | ------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| A1  | Granularity          | 6 coarse services                                            | Clear ownership without nano-services; can split later                                                                                                       |
-| A2  | Catalog store        | MongoDB, course = one document with embedded modules/lessons | Natural aggregate, atomic reorder; cross-course queries need indexes                                                                                         |
-| A3  | Service protocol     | REST via gateway reverse proxy                               | Simple, debuggable; Protobuf only for Kafka events (W3)                                                                                                      |
-| A4  | Repo layout          | Monorepo, one module                                         | Shared tooling and atomic refactors; services still deploy independently                                                                                     |
-| A5  | JWT signing          | HS256, secret only in Identity + gateway                     | Simple; RS256/JWKS is the hardening path if more verifiers appear                                                                                            |
-| A6  | Caller identity      | Gateway forwards `X-User-*`; services trust it               | No token code in services; relies on network isolation (services unpublished)                                                                                |
-| A7  | Mongo client / IDs   | Official driver v2, UUID strings                             | No ODM magic; consistent IDs across stores at a small size cost                                                                                              |
-| A8  | Mongo migrations     | golang-migrate JSON commands                                 | One tool and workflow for all databases; versioned, reviewable                                                                                               |
-| A9  | Per-service DB users | Deferred                                                     | Ownership by convention for now; separate roles/users are a stretch goal                                                                                     |
-| A10 | Sessions             | Short JWT + rotating refresh tokens in Redis                 | Revocable sessions and theft detection; parallel refresh = logout (see §4.2)                                                                                 |
-| A11 | Gateway auth         | Secure by default (explicit public allowlist)                | New routes can't be accidentally exposed                                                                                                                     |
-| A12 | Admin bootstrap      | Operator CLI                                                 | No standing admin credentials in config or over HTTP                                                                                                         |
-| O1  | API definition       | Code-first with Huma v2 on Gin; RFC 9457 errors              | One source for routing, validation and docs; rejected swaggest (separate operation list), swaggo (Swagger 2.0), Fuego (pre-1.0), hand-written spec (drifts)  |
-| O2  | Docs UI              | Swagger UI vendored into the gateway; off in production      | No third-party script on the API's origin, strict CSP, works offline; ~1.9 MB in the repo/binary, upgrades via `task docs:update`; rejected CDN + SRI hashes |
-| T1  | Test assertions      | Standard library + go-cmp                                    | Idiomatic, readable diffs, no assertion-library lock-in                                                                                                      |
-| T2  | Test databases       | testcontainers-go with the real migrations                   | Self-contained and CI-ready; needs Docker and a few seconds per package                                                                                      |
-| T3  | Contract tests       | kin-openapi validates every e2e response against the spec    | Catches gateway-level drift Huma can't see; only covers responses the e2e flow exercises                                                                     |
-| D1  | Editing published    | Draft revision + republish; students see the last published version | Updates pass the same validation as first publish; needs a second copy of the content (revision) per course                                           |
-| D2  | Lesson types         | Video, document, article, external link; no quizzes          | Covers the PRD's learning materials; no grading model to build                                                                                               |
-| D3  | Lesson files         | URL references only; no storage service                      | No MinIO or upload path to run and secure; instructors host files elsewhere, so publish validation can only check URL shape/reachability                    |
-| D4  | Enrollment rules     | Free self-enrollment; optional capacity and prerequisites; drop and re-enroll with history | Covers duplicates, limits, prerequisites and history from the PRD; no approval flow                                                    |
-| D6  | Search               | MongoDB text index inside Catalog                            | No new infrastructure; basic relevance and filters, the publish "search index" step just refreshes the indexed fields; a dedicated engine is a stretch goal  |
+| #   | Decision             | Choice                                                                                     | Why / tradeoff                                                                                                                                               |
+| --- | -------------------- | ------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| A1  | Granularity          | 6 coarse services                                                                          | Clear ownership without nano-services; can split later                                                                                                       |
+| A2  | Catalog store        | MongoDB, course = one document with embedded modules/lessons                               | Natural aggregate, atomic reorder; cross-course queries need indexes                                                                                         |
+| A3  | Service protocol     | REST via gateway reverse proxy                                                             | Simple, debuggable; Protobuf only for Kafka events (W3)                                                                                                      |
+| A4  | Repo layout          | Monorepo, one module                                                                       | Shared tooling and atomic refactors; services still deploy independently                                                                                     |
+| A5  | JWT signing          | HS256, secret only in Identity + gateway                                                   | Simple; RS256/JWKS is the hardening path if more verifiers appear                                                                                            |
+| A6  | Caller identity      | Gateway forwards `X-User-*`; services trust it                                             | No token code in services; relies on network isolation (services unpublished)                                                                                |
+| A7  | Mongo client / IDs   | Official driver v2, UUID strings                                                           | No ODM magic; consistent IDs across stores at a small size cost                                                                                              |
+| A8  | Mongo migrations     | golang-migrate JSON commands                                                               | One tool and workflow for all databases; versioned, reviewable                                                                                               |
+| A9  | Per-service DB users | Deferred                                                                                   | Ownership by convention for now; separate roles/users are a stretch goal                                                                                     |
+| A10 | Sessions             | Short JWT + rotating refresh tokens in Redis                                               | Revocable sessions and theft detection; parallel refresh = logout (see §4.2)                                                                                 |
+| A11 | Gateway auth         | Secure by default (explicit public allowlist)                                              | New routes can't be accidentally exposed                                                                                                                     |
+| A12 | Admin bootstrap      | Operator CLI                                                                               | No standing admin credentials in config or over HTTP                                                                                                         |
+| O1  | API definition       | Code-first with Huma v2 on Gin; RFC 9457 errors                                            | One source for routing, validation and docs; rejected swaggest (separate operation list), swaggo (Swagger 2.0), Fuego (pre-1.0), hand-written spec (drifts)  |
+| O2  | Docs UI              | Swagger UI vendored into the gateway; off in production                                    | No third-party script on the API's origin, strict CSP, works offline; ~1.9 MB in the repo/binary, upgrades via `task docs:update`; rejected CDN + SRI hashes |
+| T1  | Test assertions      | Standard library + go-cmp                                                                  | Idiomatic, readable diffs, no assertion-library lock-in                                                                                                      |
+| T2  | Test databases       | testcontainers-go with the real migrations                                                 | Self-contained and CI-ready; needs Docker and a few seconds per package                                                                                      |
+| T3  | Contract tests       | kin-openapi validates every e2e response against the spec                                  | Catches gateway-level drift Huma can't see; only covers responses the e2e flow exercises                                                                     |
+| D1  | Editing published    | Draft revision + republish; students see the last published version                        | Updates pass the same validation as first publish; needs a second copy of the content (revision) per course                                                  |
+| D2  | Lesson types         | Video, document, article, external link; no quizzes                                        | Covers the PRD's learning materials; no grading model to build                                                                                               |
+| D3  | Lesson files         | URL references only; no storage service                                                    | No MinIO or upload path to run and secure; instructors host files elsewhere, so publish validation can only check URL shape/reachability                     |
+| D4  | Enrollment rules     | Free self-enrollment; optional capacity and prerequisites; drop and re-enroll with history | Covers duplicates, limits, prerequisites and history from the PRD; no approval flow                                                                          |
+| D6  | Search               | MongoDB text index inside Catalog                                                          | No new infrastructure; basic relevance and filters, the publish "search index" step just refreshes the indexed fields; a dedicated engine is a stretch goal  |
+| C1  | Draft revision       | Separate `course_revisions` collection holding title, description and modules; created on first edit; optimistic `version` | Published documents are never half-edited and publish is one copy; cost is two collections, and lists show the published title until republish (no `has_draft` flag yet) |
 
 Open domain decisions (workers, completion) are tracked in [PLAN.md](../PLAN.md).
 

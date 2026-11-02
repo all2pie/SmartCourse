@@ -67,6 +67,30 @@ components:
       required:
         - title
       type: object
+    CreateLessonRequest:
+      additionalProperties: false
+      properties:
+        body:
+          maxLength: 100000
+          type: string
+        title:
+          maxLength: 255
+          minLength: 1
+          type: string
+        type:
+          enum:
+            - video
+            - document
+            - article
+            - external_link
+          type: string
+        url:
+          maxLength: 2048
+          type: string
+      required:
+        - title
+        - type
+      type: object
     ErrorDetail:
       additionalProperties: false
       properties:
@@ -117,6 +141,30 @@ components:
           format: uri
           type: string
       type: object
+    LessonResponse:
+      additionalProperties: false
+      properties:
+        body:
+          type: string
+        id:
+          format: uuid
+          type: string
+        title:
+          type: string
+        type:
+          enum:
+            - video
+            - document
+            - article
+            - external_link
+          type: string
+        url:
+          type: string
+      required:
+        - id
+        - title
+        - type
+      type: object
     LoginRequest:
       additionalProperties: false
       properties:
@@ -130,6 +178,43 @@ components:
       required:
         - email
         - password
+      type: object
+    ModuleListResponse:
+      additionalProperties: false
+      properties:
+        items:
+          items:
+            $ref: "#/components/schemas/ModuleResponse"
+          type: array
+      required:
+        - items
+      type: object
+    ModuleRequest:
+      additionalProperties: false
+      properties:
+        title:
+          maxLength: 255
+          minLength: 1
+          type: string
+      required:
+        - title
+      type: object
+    ModuleResponse:
+      additionalProperties: false
+      properties:
+        id:
+          format: uuid
+          type: string
+        lessons:
+          items:
+            $ref: "#/components/schemas/LessonResponse"
+          type: array
+        title:
+          type: string
+      required:
+        - id
+        - title
+        - lessons
       type: object
     PingOutputBody:
       additionalProperties: false
@@ -178,6 +263,32 @@ components:
         - password
         - role
       type: object
+    ReorderLessonsRequest:
+      additionalProperties: false
+      properties:
+        lesson_ids:
+          description: Every lesson ID of the module, in the new order.
+          items:
+            format: uuid
+            type: string
+          maxItems: 100
+          type: array
+      required:
+        - lesson_ids
+      type: object
+    ReorderModulesRequest:
+      additionalProperties: false
+      properties:
+        module_ids:
+          description: Every module ID of the course, in the new order.
+          items:
+            format: uuid
+            type: string
+          maxItems: 100
+          type: array
+      required:
+        - module_ids
+      type: object
     TokenResponse:
       additionalProperties: false
       properties:
@@ -211,6 +322,20 @@ components:
         title:
           maxLength: 255
           minLength: 1
+          type: string
+      type: object
+    UpdateLessonRequest:
+      additionalProperties: false
+      properties:
+        body:
+          maxLength: 100000
+          type: string
+        title:
+          maxLength: 255
+          minLength: 1
+          type: string
+        url:
+          maxLength: 2048
           type: string
       type: object
     UserResponse:
@@ -618,7 +743,7 @@ paths:
         - courses
   /courses/{id}:
     get:
-      description: Courses the caller may not see return 404, so their existence isn't revealed.
+      description: Instructors and admins see the working copy; students see the published version. Courses the caller may not see return 404, so their existence isn't revealed.
       operationId: getCourse
       parameters:
         - in: path
@@ -677,7 +802,7 @@ paths:
       tags:
         - courses
     patch:
-      description: Only the course's instructor or an admin. Omitted fields are unchanged; an empty description clears it; at least one field is required.
+      description: Only the course's instructor or an admin. Changes go to the course's working copy and are not visible to students until the course is published. Omitted fields are unchanged; an empty description clears it; at least one field is required.
       operationId: updateCourse
       parameters:
         - in: path
@@ -730,6 +855,12 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorModel"
           description: Not Found
+        "409":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Conflict
         "422":
           content:
             application/problem+json:
@@ -753,6 +884,751 @@ paths:
       summary: Update a course's title or description
       tags:
         - courses
+  /courses/{id}/modules:
+    get:
+      description: Instructors and admins see the working copy; students see the published content.
+      operationId: listModules
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            format: uuid
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ModuleListResponse"
+          description: OK
+        "401":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Unauthorized
+          headers:
+            WWW-Authenticate:
+              description: Set by the gateway when the access token is missing or invalid.
+              schema:
+                examples:
+                  - Bearer realm="smartcourse"
+                type: string
+        "404":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Not Found
+        "422":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Unprocessable Entity
+        "500":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Internal Server Error
+        "502":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: The owning service is unreachable.
+      security:
+        - bearerAuth: []
+      summary: A course's modules and lessons, in order
+      tags:
+        - content
+    post:
+      description: Only the course's instructor or an admin. Changes go to the course's working copy and are not visible to students until the course is published.
+      operationId: createModule
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            format: uuid
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ModuleRequest"
+        required: true
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ModuleResponse"
+          description: Created
+        "400":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Bad Request
+        "401":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Unauthorized
+          headers:
+            WWW-Authenticate:
+              description: Set by the gateway when the access token is missing or invalid.
+              schema:
+                examples:
+                  - Bearer realm="smartcourse"
+                type: string
+        "403":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Forbidden
+        "404":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Not Found
+        "409":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Conflict
+        "422":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Unprocessable Entity
+        "500":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Internal Server Error
+        "502":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: The owning service is unreachable.
+      security:
+        - bearerAuth: []
+      summary: Add a module at the end of the course
+      tags:
+        - content
+  /courses/{id}/modules/order:
+    put:
+      description: Only the course's instructor or an admin. Changes go to the course's working copy and are not visible to students until the course is published. The list must contain every module ID exactly once.
+      operationId: reorderModules
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            format: uuid
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReorderModulesRequest"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ModuleListResponse"
+          description: OK
+        "400":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Bad Request
+        "401":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Unauthorized
+          headers:
+            WWW-Authenticate:
+              description: Set by the gateway when the access token is missing or invalid.
+              schema:
+                examples:
+                  - Bearer realm="smartcourse"
+                type: string
+        "403":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Forbidden
+        "404":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Not Found
+        "409":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Conflict
+        "422":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Unprocessable Entity
+        "500":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Internal Server Error
+        "502":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: The owning service is unreachable.
+      security:
+        - bearerAuth: []
+      summary: Reorder modules
+      tags:
+        - content
+  /courses/{id}/modules/{module_id}:
+    delete:
+      description: Only the course's instructor or an admin. Changes go to the course's working copy and are not visible to students until the course is published.
+      operationId: deleteModule
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            format: uuid
+            type: string
+        - in: path
+          name: module_id
+          required: true
+          schema:
+            format: uuid
+            type: string
+      responses:
+        "204":
+          description: No Content
+        "401":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Unauthorized
+          headers:
+            WWW-Authenticate:
+              description: Set by the gateway when the access token is missing or invalid.
+              schema:
+                examples:
+                  - Bearer realm="smartcourse"
+                type: string
+        "403":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Forbidden
+        "404":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Not Found
+        "409":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Conflict
+        "422":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Unprocessable Entity
+        "500":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Internal Server Error
+        "502":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: The owning service is unreachable.
+      security:
+        - bearerAuth: []
+      summary: Delete a module and its lessons
+      tags:
+        - content
+    patch:
+      description: Only the course's instructor or an admin. Changes go to the course's working copy and are not visible to students until the course is published.
+      operationId: updateModule
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            format: uuid
+            type: string
+        - in: path
+          name: module_id
+          required: true
+          schema:
+            format: uuid
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ModuleRequest"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ModuleResponse"
+          description: OK
+        "400":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Bad Request
+        "401":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Unauthorized
+          headers:
+            WWW-Authenticate:
+              description: Set by the gateway when the access token is missing or invalid.
+              schema:
+                examples:
+                  - Bearer realm="smartcourse"
+                type: string
+        "403":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Forbidden
+        "404":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Not Found
+        "409":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Conflict
+        "422":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Unprocessable Entity
+        "500":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Internal Server Error
+        "502":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: The owning service is unreachable.
+      security:
+        - bearerAuth: []
+      summary: Rename a module
+      tags:
+        - content
+  /courses/{id}/modules/{module_id}/lessons:
+    post:
+      description: Only the course's instructor or an admin. Changes go to the course's working copy and are not visible to students until the course is published. Articles carry a `body`; video, document and external_link lessons carry an http(s) `url`.
+      operationId: createLesson
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            format: uuid
+            type: string
+        - in: path
+          name: module_id
+          required: true
+          schema:
+            format: uuid
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateLessonRequest"
+        required: true
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LessonResponse"
+          description: Created
+        "400":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Bad Request
+        "401":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Unauthorized
+          headers:
+            WWW-Authenticate:
+              description: Set by the gateway when the access token is missing or invalid.
+              schema:
+                examples:
+                  - Bearer realm="smartcourse"
+                type: string
+        "403":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Forbidden
+        "404":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Not Found
+        "409":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Conflict
+        "422":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Unprocessable Entity
+        "500":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Internal Server Error
+        "502":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: The owning service is unreachable.
+      security:
+        - bearerAuth: []
+      summary: Add a lesson at the end of a module
+      tags:
+        - content
+  /courses/{id}/modules/{module_id}/lessons/order:
+    put:
+      description: Only the course's instructor or an admin. Changes go to the course's working copy and are not visible to students until the course is published. The list must contain every lesson ID of the module exactly once.
+      operationId: reorderLessons
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            format: uuid
+            type: string
+        - in: path
+          name: module_id
+          required: true
+          schema:
+            format: uuid
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReorderLessonsRequest"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ModuleResponse"
+          description: OK
+        "400":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Bad Request
+        "401":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Unauthorized
+          headers:
+            WWW-Authenticate:
+              description: Set by the gateway when the access token is missing or invalid.
+              schema:
+                examples:
+                  - Bearer realm="smartcourse"
+                type: string
+        "403":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Forbidden
+        "404":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Not Found
+        "409":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Conflict
+        "422":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Unprocessable Entity
+        "500":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Internal Server Error
+        "502":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: The owning service is unreachable.
+      security:
+        - bearerAuth: []
+      summary: Reorder a module's lessons
+      tags:
+        - content
+  /courses/{id}/modules/{module_id}/lessons/{lesson_id}:
+    delete:
+      description: Only the course's instructor or an admin. Changes go to the course's working copy and are not visible to students until the course is published.
+      operationId: deleteLesson
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            format: uuid
+            type: string
+        - in: path
+          name: module_id
+          required: true
+          schema:
+            format: uuid
+            type: string
+        - in: path
+          name: lesson_id
+          required: true
+          schema:
+            format: uuid
+            type: string
+      responses:
+        "204":
+          description: No Content
+        "401":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Unauthorized
+          headers:
+            WWW-Authenticate:
+              description: Set by the gateway when the access token is missing or invalid.
+              schema:
+                examples:
+                  - Bearer realm="smartcourse"
+                type: string
+        "403":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Forbidden
+        "404":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Not Found
+        "409":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Conflict
+        "422":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Unprocessable Entity
+        "500":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Internal Server Error
+        "502":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: The owning service is unreachable.
+      security:
+        - bearerAuth: []
+      summary: Delete a lesson
+      tags:
+        - content
+    patch:
+      description: Only the course's instructor or an admin. Changes go to the course's working copy and are not visible to students until the course is published. Omitted fields are unchanged; the lesson type can't change.
+      operationId: updateLesson
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            format: uuid
+            type: string
+        - in: path
+          name: module_id
+          required: true
+          schema:
+            format: uuid
+            type: string
+        - in: path
+          name: lesson_id
+          required: true
+          schema:
+            format: uuid
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateLessonRequest"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LessonResponse"
+          description: OK
+        "400":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Bad Request
+        "401":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Unauthorized
+          headers:
+            WWW-Authenticate:
+              description: Set by the gateway when the access token is missing or invalid.
+              schema:
+                examples:
+                  - Bearer realm="smartcourse"
+                type: string
+        "403":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Forbidden
+        "404":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Not Found
+        "409":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Conflict
+        "422":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Unprocessable Entity
+        "500":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Internal Server Error
+        "502":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: The owning service is unreachable.
+      security:
+        - bearerAuth: []
+      summary: Update a lesson's title, url or body
+      tags:
+        - content
   /ping:
     get:
       operationId: ping

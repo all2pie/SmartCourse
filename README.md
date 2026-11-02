@@ -107,6 +107,11 @@ Integration tests need Docker; e2e tests need `task up` and a host `.env` (they 
 | GET    | `/courses`       | bearer | List visible courses (paginated)          |
 | GET    | `/courses/{id}`  | bearer | Get a course                              |
 | PATCH  | `/courses/{id}`  | bearer | Update title/description (owner or admin) |
+| GET    | `/courses/{id}/modules` | bearer | Modules and lessons (working copy for editors) |
+| POST/PATCH/DELETE | `/courses/{id}/modules[/{module_id}]` | bearer | Add, rename, delete a module (owner or admin) |
+| PUT    | `/courses/{id}/modules/order` | bearer | Reorder modules |
+| POST/PATCH/DELETE | `/courses/{id}/modules/{module_id}/lessons[/{lesson_id}]` | bearer | Add, update, delete a lesson |
+| PUT    | `/courses/{id}/modules/{module_id}/lessons/order` | bearer | Reorder lessons |
 
 Full request/response schemas: [api/openapi.yaml](api/openapi.yaml).
 

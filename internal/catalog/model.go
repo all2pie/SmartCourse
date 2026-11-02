@@ -20,6 +20,8 @@ type Course struct {
 	Title        string    `bson:"title"`
 	Description  string    `bson:"description"`
 	Status       Status    `bson:"status"`
-	CreatedAt    time.Time `bson:"created_at"`
-	UpdatedAt    time.Time `bson:"updated_at"`
+	// Published content; edits go to a Revision until the publish workflow applies them.
+	Modules   []Module  `bson:"modules,omitempty"`
+	CreatedAt time.Time `bson:"created_at"`
+	UpdatedAt time.Time `bson:"updated_at"`
 }

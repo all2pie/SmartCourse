@@ -5,6 +5,7 @@ package catalog
 import (
 	"errors"
 	"slices"
+	"sync"
 	"testing"
 	"time"
 
@@ -50,25 +51,77 @@ func TestMongoRepository(t *testing.T) {
 		}
 	})
 
-	t.Run("update", func(t *testing.T) {
-		c := create(t, uuid.New(), StatusDraft, "before")
-		desc := "new description"
-		got, err := repo.Update(ctx, c.ID, UpdateInput{Description: &desc})
+	t.Run("revision lifecycle", func(t *testing.T) {
+		c := create(t, uuid.New(), StatusPublished, "live")
+		c.Modules = []Module{{ID: uuid.New(), Title: "m1", Lessons: []Lesson{{ID: uuid.New(), Title: "l1", Type: LessonVideo, URL: "https://example.com/v"}}}}
+
+		if _, err := repo.GetRevision(ctx, c.ID); !errors.Is(err, ErrNoRevision) {
+			t.Fatalf("before any edit: err = %v, want ErrNoRevision", err)
+		}
+
+		rev, err := repo.EnsureRevision(ctx, &c)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if got.Title != "before" || got.Description != desc || !got.UpdatedAt.After(c.UpdatedAt) {
-			t.Fatalf("updated %+v", got)
+		if rev.ID != c.ID || rev.Title != "live" || rev.Version != 0 || cmp.Diff(c.Modules, rev.Modules) != "" {
+			t.Fatalf("ensured %+v", rev)
+		}
+
+		rev.Title = "draft"
+		stale := *rev
+		if err := repo.SaveRevision(ctx, rev); err != nil {
+			t.Fatal(err)
+		}
+		if rev.Version != 1 {
+			t.Fatalf("version = %d, want 1", rev.Version)
+		}
+		if err := repo.SaveRevision(ctx, &stale); !errors.Is(err, ErrEditConflict) {
+			t.Fatalf("stale save: err = %v, want ErrEditConflict", err)
+		}
+
+		// A second Ensure returns the stored draft instead of resetting it from the course.
+		again, err := repo.EnsureRevision(ctx, &c)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if again.Title != "draft" || again.Version != 1 {
+			t.Fatalf("ensured again %+v", again)
+		}
+
+		got, err := repo.GetRevision(ctx, c.ID)
+		if err != nil || got.Title != "draft" {
+			t.Fatalf("get = %+v, %v", got, err)
+		}
+	})
+
+	t.Run("concurrent first edits create one revision", func(t *testing.T) {
+		c := create(t, uuid.New(), StatusDraft, "race")
+
+		var wg sync.WaitGroup
+		errCh := make(chan error, 8)
+		for range cap(errCh) {
+			wg.Go(func() {
+				_, err := repo.EnsureRevision(ctx, &c)
+				errCh <- err
+			})
+		}
+		wg.Wait()
+		close(errCh)
+		for err := range errCh {
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+
+		n, err := db.Collection("course_revisions").CountDocuments(ctx, bson.D{{Key: "_id", Value: c.ID}})
+		if err != nil || n != 1 {
+			t.Fatalf("revisions = %d, %v", n, err)
 		}
 	})
 
 	t.Run("not found", func(t *testing.T) {
 		if _, err := repo.GetByID(ctx, uuid.New()); !errors.Is(err, ErrNotFound) {
 			t.Fatalf("get: err = %v", err)
-		}
-		title := "x"
-		if _, err := repo.Update(ctx, uuid.New(), UpdateInput{Title: &title}); !errors.Is(err, ErrNotFound) {
-			t.Fatalf("update: err = %v", err)
 		}
 	})
 

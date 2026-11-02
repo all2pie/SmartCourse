@@ -49,8 +49,9 @@ func (h *Handler) Register(api huma.API) {
 		Path:        "/courses/{id}",
 		Tags:        tags,
 		Summary:     "A course",
-		Description: "Courses the caller may not see return 404, so their existence isn't revealed.",
-		Errors:      []int{http.StatusNotFound},
+		Description: "Instructors and admins see the working copy; students see the published version. " +
+			"Courses the caller may not see return 404, so their existence isn't revealed.",
+		Errors: []int{http.StatusNotFound},
 	}), h.getByID)
 
 	httpapi.Register(api, httpapi.Protected(huma.Operation{
@@ -59,10 +60,13 @@ func (h *Handler) Register(api huma.API) {
 		Path:        "/courses/{id}",
 		Tags:        tags,
 		Summary:     "Update a course's title or description",
-		Description: "Only the course's instructor or an admin. Omitted fields are unchanged; " +
+		Description: "Only the course's instructor or an admin. Changes go to the course's working copy and are not " +
+			"visible to students until the course is published. Omitted fields are unchanged; " +
 			"an empty description clears it; at least one field is required.",
-		Errors: []int{http.StatusForbidden, http.StatusNotFound},
+		Errors: []int{http.StatusForbidden, http.StatusNotFound, http.StatusConflict},
 	}), h.update)
+
+	h.registerContent(api)
 }
 
 type CourseResponse struct {

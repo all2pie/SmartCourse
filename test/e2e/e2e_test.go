@@ -305,6 +305,57 @@ func TestEndToEnd(t *testing.T) {
 		t.Errorf("patched course %s", r.body)
 	}
 
+	// Content: edits land in the working copy, which only editors can see.
+	modulesPath := "/courses/" + courseID + "/modules"
+	r = c.do(http.MethodPost, modulesPath, instructorAT, map[string]any{"title": "Basics"})
+	expect(t, r, http.StatusCreated, "create module")
+	moduleID := r.str(t, "id")
+	expect(t, c.do(http.MethodPost, modulesPath, instructorAT, map[string]any{"title": "Advanced"}), http.StatusCreated, "create second module")
+	expectProblem(t, c.do(http.MethodPost, modulesPath, studentAT, map[string]any{"title": "x"}), http.StatusNotFound, "student edits a draft's content")
+	expectProblem(t, c.do(http.MethodPost, modulesPath, instructorAT, map[string]any{"title": ""}), http.StatusUnprocessableEntity, "empty module title")
+
+	lessonsPath := modulesPath + "/" + moduleID + "/lessons"
+	r = c.do(http.MethodPost, lessonsPath, instructorAT, map[string]any{"title": "Intro", "type": "article", "body": "Welcome"})
+	expect(t, r, http.StatusCreated, "create article")
+	articleID := r.str(t, "id")
+	r = c.do(http.MethodPost, lessonsPath, instructorAT, map[string]any{"title": "Demo", "type": "video", "url": "https://example.com/demo.mp4"})
+	expect(t, r, http.StatusCreated, "create video")
+	videoID := r.str(t, "id")
+	expectProblem(t, c.do(http.MethodPost, lessonsPath, instructorAT, map[string]any{"title": "x", "type": "external_link", "url": "javascript:alert(1)"}), http.StatusUnprocessableEntity, "non-http lesson url")
+	expectProblem(t, c.do(http.MethodPost, lessonsPath, instructorAT, map[string]any{"title": "x", "type": "article"}), http.StatusUnprocessableEntity, "article without body")
+	expectProblem(t, c.do(http.MethodPost, modulesPath+"/"+uuid.NewString()+"/lessons", instructorAT, map[string]any{"title": "x", "type": "article", "body": "b"}), http.StatusNotFound, "lesson in unknown module")
+
+	expect(t, c.do(http.MethodPatch, modulesPath+"/"+moduleID, instructorAT, map[string]any{"title": "Fundamentals"}), http.StatusOK, "rename module")
+	expect(t, c.do(http.MethodPut, lessonsPath+"/order", instructorAT, map[string]any{"lesson_ids": []string{videoID, articleID}}), http.StatusOK, "reorder lessons")
+	expectProblem(t, c.do(http.MethodPut, lessonsPath+"/order", instructorAT, map[string]any{"lesson_ids": []string{videoID}}), http.StatusUnprocessableEntity, "incomplete lesson order")
+	expect(t, c.do(http.MethodPatch, lessonsPath+"/"+articleID, instructorAT, map[string]any{"body": "Welcome back"}), http.StatusOK, "update lesson")
+
+	r = c.do(http.MethodGet, modulesPath, instructorAT, nil)
+	expect(t, r, http.StatusOK, "owner lists modules")
+	modules, _ := r.json(t)["items"].([]any)
+	if len(modules) != 2 {
+		t.Fatalf("owner's working copy %s", r.body)
+	}
+	first, _ := modules[0].(map[string]any)
+	lessons, _ := first["lessons"].([]any)
+	if len(lessons) != 2 {
+		t.Fatalf("owner's working copy %s", r.body)
+	}
+	firstLesson, _ := lessons[0].(map[string]any)
+	if first["title"] != "Fundamentals" || firstLesson["id"] != videoID {
+		t.Errorf("owner's working copy %s", r.body)
+	}
+	expectProblem(t, c.do(http.MethodGet, modulesPath, studentAT, nil), http.StatusNotFound, "student lists a draft's modules")
+
+	expect(t, c.do(http.MethodDelete, lessonsPath+"/"+videoID, instructorAT, nil), http.StatusNoContent, "delete lesson")
+	expectProblem(t, c.do(http.MethodDelete, lessonsPath+"/"+videoID, instructorAT, nil), http.StatusNotFound, "delete lesson again")
+	expect(t, c.do(http.MethodDelete, modulesPath+"/"+moduleID, instructorAT, nil), http.StatusNoContent, "delete module")
+	r = c.do(http.MethodGet, "/courses/"+courseID, instructorAT, nil)
+	expect(t, r, http.StatusOK, "owner reads the course")
+	if r.str(t, "description") != "Learn Go" {
+		t.Errorf("course lost its draft description after content edits: %s", r.body)
+	}
+
 	r = c.do(http.MethodGet, "/courses?instructor_id="+instructorID, instructorAT, nil)
 	expect(t, r, http.StatusOK, "instructor lists own courses")
 	if r.json(t)["total"] != float64(1) {
