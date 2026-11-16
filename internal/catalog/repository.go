@@ -104,29 +104,27 @@ func (r *mongoRepository) EnsureRevision(ctx context.Context, c *Course) (*Revis
 	}
 	opts := options.FindOneAndUpdate().SetUpsert(true).SetReturnDocument(options.After)
 
-	// Two first edits can race on the upsert; the loser gets a duplicate key error and just reads the winner's copy.
-	for range 2 {
-		var rev Revision
-		err := r.revisions.FindOneAndUpdate(ctx,
-			bson.D{{Key: "_id", Value: c.ID}},
-			bson.D{{Key: "$setOnInsert", Value: bson.D{
-				{Key: "title", Value: initial.Title},
-				{Key: "description", Value: initial.Description},
-				{Key: "modules", Value: initial.Modules},
-				{Key: "version", Value: int64(0)},
-				{Key: "created_at", Value: initial.CreatedAt},
-				{Key: "updated_at", Value: initial.UpdatedAt},
-			}}},
-			opts,
-		).Decode(&rev)
-		if err == nil {
-			return &rev, nil
-		}
-		if !mongo.IsDuplicateKeyError(err) {
-			return nil, fmt.Errorf("ensuring revision: %w", err)
-		}
+	var rev Revision
+	err := r.revisions.FindOneAndUpdate(ctx,
+		bson.D{{Key: "_id", Value: c.ID}},
+		bson.D{{Key: "$setOnInsert", Value: bson.D{
+			{Key: "title", Value: initial.Title},
+			{Key: "description", Value: initial.Description},
+			{Key: "modules", Value: initial.Modules},
+			{Key: "version", Value: int64(0)},
+			{Key: "created_at", Value: initial.CreatedAt},
+			{Key: "updated_at", Value: initial.UpdatedAt},
+		}}},
+		opts,
+	).Decode(&rev)
+	// The server retries a lost upsert race itself; a duplicate key that still surfaces is retried by the caller.
+	if mongo.IsDuplicateKeyError(err) {
+		return nil, ErrEditConflict
 	}
-	return nil, ErrEditConflict
+	if err != nil {
+		return nil, fmt.Errorf("ensuring revision: %w", err)
+	}
+	return &rev, nil
 }
 
 func (r *mongoRepository) SaveRevision(ctx context.Context, rev *Revision) error {
